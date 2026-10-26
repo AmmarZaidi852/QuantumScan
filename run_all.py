@@ -124,7 +124,7 @@ def main():
                     row.update(evaluate(model, Z_test, y_te))
                     row["train_time_s"] = train_time
                     rows.append(row)
-                    print(f"  pca={n_components} N={n:<3} seed={seed} {name:<8} "
+                    print(f"  pca={n_components} N={n:<3} seed={seed} {name:<13} "
                           f"AUROC={row['auroc']:.3f}  time={train_time:.2f}s")
 
                 if "SVM-RBF" in fitted and "QK-Fidelity" in fitted:

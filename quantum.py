@@ -209,21 +209,26 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
     align_iters : aligned kernel only, maximum L-BFGS-B iterations when
                 training the per-feature scaling weights (at most 10 loss
                 evaluations per iteration are allowed)
+    entangle  : False drops the ZZ gates (product states). kernel="no_entangle"
+                is the same as kernel="fidelity" with entangle=False; this
+                switch gives the same ablation for the hybrid and aligned kernels.
     """
 
     def __init__(self, kernel="fidelity", C=1.0, bandwidth=1.0, gamma="scale", weight=0.5,
-                 align_iters=10, n_reps=N_REPS):
+                 align_iters=10, entangle=True, n_reps=N_REPS):
         self.kernel = kernel
         self.C = C
         self.bandwidth = bandwidth
         self.gamma = gamma
         self.weight = weight
         self.align_iters = align_iters
+        self.entangle = entangle
         self.n_reps = n_reps
 
     def _states(self, X_scaled, feature_weights):
         angles = self.bandwidth * feature_weights * X_scaled
-        return zz_feature_map_states(angles, self.n_reps, entangle=self.kernel != "no_entangle")
+        entangle = self.entangle and self.kernel != "no_entangle"
+        return zz_feature_map_states(angles, self.n_reps, entangle=entangle)
 
     def _encode(self, X):
         """PCA features -> circuit angles -> one quantum state per patient."""
@@ -243,7 +248,8 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
         instead of once per grid point. The result is the same either way.
         """
         X_scaled = self.scaler_.transform(X)
-        key = (X_scaled.tobytes(), np.asarray(y).tobytes(), self.bandwidth, self.n_reps, self.align_iters)
+        key = (X_scaled.tobytes(), np.asarray(y).tobytes(), self.bandwidth, self.n_reps,
+               self.align_iters, self.entangle)
         if key in _ALIGN_CACHE:
             self.alignment_, weights = _ALIGN_CACHE[key]
             return weights
