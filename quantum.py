@@ -27,9 +27,14 @@ Models (registered in QUANTUM_MODELS, used by run_all.py):
                     by CV. A sum of two kernels is still a valid kernel, so this
                     tests whether the quantum kernel adds anything on top of the
                     classical RBF kernel.
+    QK-Aligned    : QK-Fidelity with one trainable scaling weight per feature
+                    inside the ZZ feature map, fitted by maximising
+                    kernel-target alignment on the training sample
+                    (quantum kernel alignment, Hubregtsen et al. 2022).
 """
 
 import numpy as np
+from scipy.optimize import minimize
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.metrics.pairwise import rbf_kernel
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
@@ -122,6 +127,14 @@ def fidelity_kernel(states_a, states_b):
     return np.abs(states_a.conj() @ states_b.T) ** 2
 
 
+def kernel_target_alignment(K, y):
+    """A(K, yy^T) = <K, yy^T>_F / (||K||_F ||yy^T||_F) with labels in {-1, +1}
+    (Cristianini et al. 2001). Close to 1 when same-class patients have high
+    kernel values and different-class patients low ones."""
+    signs = 2 * np.asarray(y) - 1
+    return float(signs @ K @ signs / (np.linalg.norm(K) * len(signs)))
+
+
 def pauli_expectations(states):
     """<X>, <Y>, <Z> of every qubit -> features of shape (n_samples, 3 * n_qubits).
 
@@ -175,12 +188,15 @@ def geometric_difference(K_classical, K_quantum, reg=1e-2):
 # 3. scikit-learn compatible classifier
 # ===========================================================================
 
+_ALIGN_CACHE = {}  # (training data, bandwidth, ...) -> (alignment before/after, weights)
+
+
 class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
     """SVC with a precomputed quantum kernel.
 
     Parameters
     ----------
-    kernel    : "fidelity", "no_entangle", "projected" or "hybrid"
+    kernel    : "fidelity", "no_entangle", "projected", "hybrid" or "aligned"
     C         : SVM regularisation strength
     bandwidth : scales the [0, pi] features before encoding. Small bandwidth
                 = small rotation angles = smoother, less "spiky" kernel
@@ -190,21 +206,60 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
                 "scale" = 1 / (n_features * var), same rule as scikit-learn's SVC
     weight    : hybrid kernel only, weight w of the quantum kernel in
                 w * K_fidelity + (1 - w) * K_rbf
+    align_iters : aligned kernel only, maximum L-BFGS-B iterations when
+                training the per-feature scaling weights (at most 10 loss
+                evaluations per iteration are allowed)
     """
 
     def __init__(self, kernel="fidelity", C=1.0, bandwidth=1.0, gamma="scale", weight=0.5,
-                 n_reps=N_REPS):
+                 align_iters=10, n_reps=N_REPS):
         self.kernel = kernel
         self.C = C
         self.bandwidth = bandwidth
         self.gamma = gamma
         self.weight = weight
+        self.align_iters = align_iters
         self.n_reps = n_reps
+
+    def _states(self, X_scaled, feature_weights):
+        angles = self.bandwidth * feature_weights * X_scaled
+        return zz_feature_map_states(angles, self.n_reps, entangle=self.kernel != "no_entangle")
 
     def _encode(self, X):
         """PCA features -> circuit angles -> one quantum state per patient."""
-        angles = self.bandwidth * self.scaler_.transform(X)
-        return zz_feature_map_states(angles, self.n_reps, entangle=self.kernel != "no_entangle")
+        return self._states(self.scaler_.transform(X), self.feature_weights_)
+
+    def _align(self, X, y):
+        """Per-feature scaling weights that maximise kernel-target alignment
+        of the fidelity kernel on the training sample.
+
+        Starts from all weights = 1 (= QK-Fidelity) and runs a few L-BFGS-B
+        iterations with finite-difference gradients. The start point is fixed,
+        so the result is deterministic. Weights are kept in [0, 5]; a weight
+        of 0 switches that feature off.
+
+        The weights do not depend on C, so they are cached per (training
+        data, bandwidth): GridSearchCV then aligns once per fold and bandwidth
+        instead of once per grid point. The result is the same either way.
+        """
+        X_scaled = self.scaler_.transform(X)
+        key = (X_scaled.tobytes(), np.asarray(y).tobytes(), self.bandwidth, self.n_reps, self.align_iters)
+        if key in _ALIGN_CACHE:
+            self.alignment_, weights = _ALIGN_CACHE[key]
+            return weights
+
+        def loss(w):
+            states = self._states(X_scaled, w)
+            return -kernel_target_alignment(fidelity_kernel(states, states), y)
+
+        w0 = np.ones(X.shape[1])
+        result = minimize(loss, w0, method="L-BFGS-B", bounds=[(0.0, 5.0)] * len(w0),
+                          options={"maxiter": self.align_iters, "maxfun": 10 * self.align_iters})
+        self.alignment_ = (-loss(w0), -result.fun)  # before, after
+        if len(_ALIGN_CACHE) > 256:
+            _ALIGN_CACHE.clear()
+        _ALIGN_CACHE[key] = (self.alignment_, result.x)
+        return result.x
 
     def _represent(self, X):
         """What we store per patient: the state, its Pauli expectations,
@@ -228,6 +283,9 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
     def fit(self, X, y):
         # MinMax scaling to [0, pi] is fitted on the training data only.
         self.scaler_ = MinMaxScaler(feature_range=(0, np.pi)).fit(X)
+        self.feature_weights_ = np.ones(X.shape[1])
+        if self.kernel == "aligned":
+            self.feature_weights_ = self._align(X, y)
         self.train_repr_ = self._represent(X)
         if self.kernel in ("projected", "hybrid"):
             rbf_input = self.train_repr_ if self.kernel == "projected" else X
@@ -292,12 +350,17 @@ def make_qk_hybrid(seed):
     return _tuned("hybrid", HYBRID_GRID, seed)
 
 
+def make_qk_aligned(seed):
+    return _tuned("aligned", FIDELITY_GRID, seed)
+
+
 # Registry of quantum models: display name -> factory function.
 QUANTUM_MODELS = {
     "QK-Fidelity": make_qk_fidelity,
     "QK-Projected": make_qk_projected,
     "QK-NoEntangle": make_qk_no_entangle,
     "QK-Hybrid": make_qk_hybrid,
+    "QK-Aligned": make_qk_aligned,
 }
 
 
