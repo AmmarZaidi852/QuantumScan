@@ -23,6 +23,10 @@ Models (registered in QUANTUM_MODELS, used by run_all.py):
                     on those (projected quantum kernel, Huang et al. 2021).
     QK-NoEntangle : same as QK-Fidelity but without the ZZ (entangling) gates.
                     Ablation: does entanglement matter?
+    QK-Hybrid     : K = w * K_fidelity + (1 - w) * K_rbf, with the weight w tuned
+                    by CV. A sum of two kernels is still a valid kernel, so this
+                    tests whether the quantum kernel adds anything on top of the
+                    classical RBF kernel.
 """
 
 import numpy as np
@@ -176,20 +180,25 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
 
     Parameters
     ----------
-    kernel    : "fidelity", "no_entangle" or "projected"
+    kernel    : "fidelity", "no_entangle", "projected" or "hybrid"
     C         : SVM regularisation strength
     bandwidth : scales the [0, pi] features before encoding. Small bandwidth
                 = small rotation angles = smoother, less "spiky" kernel
                 (Shaydulin & Wild 2022; Canatar et al. 2022)
-    gamma     : RBF width for the projected kernel ("scale" = 1 / (n_features * var),
-                same rule as scikit-learn's SVC)
+    gamma     : RBF width for the projected kernel (on the Pauli expectations)
+                and for the RBF part of the hybrid kernel (on the PCA features).
+                "scale" = 1 / (n_features * var), same rule as scikit-learn's SVC
+    weight    : hybrid kernel only, weight w of the quantum kernel in
+                w * K_fidelity + (1 - w) * K_rbf
     """
 
-    def __init__(self, kernel="fidelity", C=1.0, bandwidth=1.0, gamma="scale", n_reps=N_REPS):
+    def __init__(self, kernel="fidelity", C=1.0, bandwidth=1.0, gamma="scale", weight=0.5,
+                 n_reps=N_REPS):
         self.kernel = kernel
         self.C = C
         self.bandwidth = bandwidth
         self.gamma = gamma
+        self.weight = weight
         self.n_reps = n_reps
 
     def _encode(self, X):
@@ -198,21 +207,31 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
         return zz_feature_map_states(angles, self.n_reps, entangle=self.kernel != "no_entangle")
 
     def _represent(self, X):
-        """What we store per patient: the state, or its Pauli expectations."""
+        """What we store per patient: the state, its Pauli expectations,
+        or (hybrid) the state together with the PCA features."""
         states = self._encode(X)
-        return pauli_expectations(states) if self.kernel == "projected" else states
+        if self.kernel == "projected":
+            return pauli_expectations(states)
+        if self.kernel == "hybrid":
+            return states, X
+        return states
 
     def _kernel(self, A, B):
         if self.kernel == "projected":
             return rbf_kernel(A, B, gamma=self.gamma_)
+        if self.kernel == "hybrid":
+            (states_a, X_a), (states_b, X_b) = A, B
+            return (self.weight * fidelity_kernel(states_a, states_b)
+                    + (1 - self.weight) * rbf_kernel(X_a, X_b, gamma=self.gamma_))
         return fidelity_kernel(A, B)
 
     def fit(self, X, y):
         # MinMax scaling to [0, pi] is fitted on the training data only.
         self.scaler_ = MinMaxScaler(feature_range=(0, np.pi)).fit(X)
         self.train_repr_ = self._represent(X)
-        if self.kernel == "projected":
-            self.gamma_ = (1.0 / (self.train_repr_.shape[1] * self.train_repr_.var())
+        if self.kernel in ("projected", "hybrid"):
+            rbf_input = self.train_repr_ if self.kernel == "projected" else X
+            self.gamma_ = (1.0 / (rbf_input.shape[1] * rbf_input.var())
                            if self.gamma == "scale" else self.gamma)
         self.K_train_ = self._kernel(self.train_repr_, self.train_repr_)
         self.svc_ = SVC(kernel="precomputed", C=self.C).fit(self.K_train_, y)
@@ -231,8 +250,8 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
 # ===========================================================================
 # 4. Model factories with hyperparameter tuning
 # ===========================================================================
-# Each grid has 20 combinations, the same as the classical SVM grid
-# (4 C x 5 gamma), so every SVM gets the same tuning budget.
+# Each grid has at most 20 combinations, the same as the classical SVM grid
+# (4 C x 5 gamma), so no quantum model gets a bigger tuning budget.
 
 # Log-spaced bandwidths, 0.01 to 0.25. At 8 qubits, bandwidths of 0.5 and 1.0
 # make the training kernel almost the identity (mean off-diagonal ~0.01): every
@@ -244,6 +263,9 @@ BANDWIDTHS = [0.01, 0.022, 0.05, 0.112, 0.25]  # np.geomspace(0.01, 0.25, 5), ro
 
 FIDELITY_GRID = {"C": [0.1, 1, 10, 100], "bandwidth": BANDWIDTHS}                    # 4 x 5 = 20
 PROJECTED_GRID = {"C": [1, 10], "bandwidth": BANDWIDTHS, "gamma": ["scale", 1.0]}   # 2 x 5 x 2 = 20
+# Hybrid: 3 weights x 2 C x 3 bandwidths (smallest, middle, largest) = 18 <= 20.
+# The RBF part uses gamma="scale", scikit-learn's default for SVC.
+HYBRID_GRID = {"C": [1, 10], "bandwidth": BANDWIDTHS[::2], "weight": [0.25, 0.5, 0.75]}
 
 
 def _tuned(kernel, grid, seed):
@@ -266,11 +288,16 @@ def make_qk_no_entangle(seed):
     return _tuned("no_entangle", FIDELITY_GRID, seed)
 
 
+def make_qk_hybrid(seed):
+    return _tuned("hybrid", HYBRID_GRID, seed)
+
+
 # Registry of quantum models: display name -> factory function.
 QUANTUM_MODELS = {
     "QK-Fidelity": make_qk_fidelity,
     "QK-Projected": make_qk_projected,
     "QK-NoEntangle": make_qk_no_entangle,
+    "QK-Hybrid": make_qk_hybrid,
 }
 
 
