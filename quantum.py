@@ -234,7 +234,13 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
 # Each grid has 20 combinations, the same as the classical SVM grid
 # (4 C x 5 gamma), so every SVM gets the same tuning budget.
 
-BANDWIDTHS = [0.05, 0.1, 0.25, 0.5, 1.0]
+# Log-spaced bandwidths, 0.01 to 0.25. At 8 qubits, bandwidths of 0.5 and 1.0
+# make the training kernel almost the identity (mean off-diagonal ~0.01): every
+# patient looks unrelated to every other, the "exponential concentration" of
+# fidelity kernels. 3-fold CV on 25 patients still sometimes picked them, so they
+# are left out. At the small end, 0.01 gives an almost constant kernel
+# (off-diagonal ~0.99), so going lower adds nothing.
+BANDWIDTHS = [0.01, 0.022, 0.05, 0.112, 0.25]  # np.geomspace(0.01, 0.25, 5), rounded
 
 FIDELITY_GRID = {"C": [0.1, 1, 10, 100], "bandwidth": BANDWIDTHS}                    # 4 x 5 = 20
 PROJECTED_GRID = {"C": [1, 10], "bandwidth": BANDWIDTHS, "gamma": ["scale", 1.0]}   # 2 x 5 x 2 = 20

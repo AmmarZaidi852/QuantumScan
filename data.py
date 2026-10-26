@@ -32,12 +32,20 @@ def load_split(split, root=DATA_DIR):
     y : array of shape (n_images,), 0 = normal, 1 = pneumonia
     """
     import os
-    from medmnist import PneumoniaMNIST  # imported here so the rest of the module works without it
 
     os.makedirs(root, exist_ok=True)
-    ds = PneumoniaMNIST(split=split, download=True, root=root, size=28)
-    X = ds.imgs.reshape(len(ds.imgs), -1).astype(np.float64) / 255.0  # flatten 28x28 -> 784
-    y = ds.labels.ravel().astype(int)
+    try:
+        from medmnist import PneumoniaMNIST  # imported here so the rest of the module works without it
+        ds = PneumoniaMNIST(split=split, download=True, root=root, size=28)
+        imgs, labels = ds.imgs, ds.labels
+    except ImportError:
+        # medmnist needs torch, which Windows Smart App Control blocks. Read the
+        # same official file directly instead (https://zenodo.org/records/10519652,
+        # pneumoniamnist.npz, MD5 28209eda62fecd6e6a2d98b1501bb15f).
+        with np.load(os.path.join(root, "pneumoniamnist.npz"), allow_pickle=False) as f:
+            imgs, labels = f[f"{split}_images"], f[f"{split}_labels"]
+    X = imgs.reshape(len(imgs), -1).astype(np.float64) / 255.0  # flatten 28x28 -> 784
+    y = labels.ravel().astype(int)
     return X, y
 
 
