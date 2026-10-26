@@ -80,9 +80,14 @@ def run_geometric_difference(fitted, Z_train):
     return geometric_difference(K_classical, K_quantum)
 
 
+def chosen_bandwidth(model):
+    """Bandwidth the tuned quantum model used in its final refit (NaN for classical models)."""
+    return getattr(getattr(model, "best_estimator_", None), "bandwidth_", np.nan)
+
+
 def summarize(df):
     """Mean and std of each metric per model, n_components and N."""
-    metrics = ["auroc", "accuracy", "sensitivity", "specificity", "f1", "train_time_s"]
+    metrics = ["auroc", "accuracy", "sensitivity", "specificity", "f1", "train_time_s", "bandwidth"]
     return df.groupby(["model", "n_components", "N"])[metrics].agg(["mean", "std"])
 
 
@@ -123,6 +128,7 @@ def main():
                     row = {"model": name, "n_components": n_components, "N": n, "seed": seed}
                     row.update(evaluate(model, Z_test, y_te))
                     row["train_time_s"] = train_time
+                    row["bandwidth"] = chosen_bandwidth(model)
                     rows.append(row)
                     print(f"  pca={n_components} N={n:<3} seed={seed} {name:<13} "
                           f"AUROC={row['auroc']:.3f}  time={train_time:.2f}s")

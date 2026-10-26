@@ -8,6 +8,7 @@ runs where PennyLane is installed (e.g. Google Colab).
 
 Pipeline for every quantum model:
     PCA features --MinMax to [0, pi]--> x --* bandwidth--> circuit angles
+    (the bandwidth is calibrated on the training data, see calibrate_bandwidth)
     --ZZ feature map--> one quantum state per patient --> kernel matrix
     --> SVC(kernel="precomputed")
 
@@ -185,7 +186,60 @@ def geometric_difference(K_classical, K_quantum, reg=1e-2):
 
 
 # ===========================================================================
-# 3. scikit-learn compatible classifier
+# 3. Bandwidth calibration (training data only)
+# ===========================================================================
+# Like the median heuristic for RBF kernels (gamma = 1 / median squared
+# distance), the bandwidth is not taken from a fixed list. It is solved for so
+# that the MEDIAN OFF-DIAGONAL value of the fidelity kernel on the training
+# data equals a target. The target is the hyperparameter that CV tunes.
+# Because the rule only looks at the training kernel, the same target gives
+# different bandwidths for 4 and 8 qubits and for different training samples.
+
+BANDWIDTH_SCAN = np.geomspace(1e-3, 2.0, 41)  # bandwidths tried when calibrating
+_CURVE_CACHE = {}  # (training data, entangle, n_reps) -> median kernel value per scanned bandwidth
+
+
+def median_offdiagonal(K):
+    return float(np.median(K[np.triu_indices(len(K), k=1)]))
+
+
+def calibrate_bandwidth(X_scaled, target, entangle=True, n_reps=N_REPS):
+    """Bandwidth at which the median off-diagonal fidelity kernel value on
+    X_scaled (training data, already scaled to [0, pi]) equals `target`.
+
+    The median kernel value falls from 1 (bandwidth -> 0, all patients look
+    the same) as the bandwidth grows. We scan BANDWIDTH_SCAN, take the first
+    crossing of `target` and interpolate (log-linearly) between the two
+    scanned points around it. If the target is never reached (the kernel
+    cannot get that small), the scanned bandwidth whose median is closest to
+    the target is used. The scan does not depend on the target, so it is
+    cached per training set.
+    """
+    key = (X_scaled.tobytes(), X_scaled.shape, entangle, n_reps)
+    if key not in _CURVE_CACHE:
+        medians = []
+        for bw in BANDWIDTH_SCAN:
+            states = zz_feature_map_states(bw * X_scaled, n_reps, entangle=entangle)
+            medians.append(median_offdiagonal(fidelity_kernel(states, states)))
+        if len(_CURVE_CACHE) > 256:
+            _CURVE_CACHE.clear()
+        _CURVE_CACHE[key] = np.array(medians)
+    medians = _CURVE_CACHE[key]
+
+    below = np.where(medians <= target)[0]
+    if len(below) == 0:
+        return float(BANDWIDTH_SCAN[np.argmin(np.abs(medians - target))])
+    i = below[0]
+    if i == 0:
+        return float(BANDWIDTH_SCAN[0])
+    m_hi, m_lo = medians[i - 1], medians[i]  # m_hi > target >= m_lo
+    t = (m_hi - target) / (m_hi - m_lo)
+    log_lo, log_hi = np.log(BANDWIDTH_SCAN[i - 1]), np.log(BANDWIDTH_SCAN[i])
+    return float(np.exp(log_lo + t * (log_hi - log_lo)))
+
+
+# ===========================================================================
+# 4. scikit-learn compatible classifier
 # ===========================================================================
 
 _ALIGN_CACHE = {}  # (training data, bandwidth, ...) -> (alignment before/after, weights)
@@ -198,9 +252,14 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
     ----------
     kernel    : "fidelity", "no_entangle", "projected", "hybrid" or "aligned"
     C         : SVM regularisation strength
-    bandwidth : scales the [0, pi] features before encoding. Small bandwidth
-                = small rotation angles = smoother, less "spiky" kernel
-                (Shaydulin & Wild 2022; Canatar et al. 2022)
+    kernel_median : target median off-diagonal value of the fidelity kernel
+                on the training data. In fit, the bandwidth (which scales the
+                [0, pi] features before encoding) is calibrated to hit it.
+                High target = small bandwidth = smooth kernel; low target =
+                large bandwidth = "spiky" kernel (Shaydulin & Wild 2022;
+                Canatar et al. 2022)
+    bandwidth : fixed bandwidth instead of calibration (None = calibrate).
+                The bandwidth actually used is stored in bandwidth_
     gamma     : RBF width for the projected kernel (on the Pauli expectations)
                 and for the RBF part of the hybrid kernel (on the PCA features).
                 "scale" = 1 / (n_features * var), same rule as scikit-learn's SVC
@@ -214,10 +273,11 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
                 switch gives the same ablation for the hybrid and aligned kernels.
     """
 
-    def __init__(self, kernel="fidelity", C=1.0, bandwidth=1.0, gamma="scale", weight=0.5,
-                 align_iters=10, entangle=True, n_reps=N_REPS):
+    def __init__(self, kernel="fidelity", C=1.0, kernel_median=float(np.exp(-1)), bandwidth=None,
+                 gamma="scale", weight=0.5, align_iters=10, entangle=True, n_reps=N_REPS):
         self.kernel = kernel
         self.C = C
+        self.kernel_median = kernel_median
         self.bandwidth = bandwidth
         self.gamma = gamma
         self.weight = weight
@@ -225,10 +285,12 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
         self.entangle = entangle
         self.n_reps = n_reps
 
+    def _entangled(self):
+        return self.entangle and self.kernel != "no_entangle"
+
     def _states(self, X_scaled, feature_weights):
-        angles = self.bandwidth * feature_weights * X_scaled
-        entangle = self.entangle and self.kernel != "no_entangle"
-        return zz_feature_map_states(angles, self.n_reps, entangle=entangle)
+        angles = self.bandwidth_ * feature_weights * X_scaled
+        return zz_feature_map_states(angles, self.n_reps, entangle=self._entangled())
 
     def _encode(self, X):
         """PCA features -> circuit angles -> one quantum state per patient."""
@@ -248,7 +310,7 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
         instead of once per grid point. The result is the same either way.
         """
         X_scaled = self.scaler_.transform(X)
-        key = (X_scaled.tobytes(), np.asarray(y).tobytes(), self.bandwidth, self.n_reps,
+        key = (X_scaled.tobytes(), np.asarray(y).tobytes(), self.bandwidth_, self.n_reps,
                self.align_iters, self.entangle)
         if key in _ALIGN_CACHE:
             self.alignment_, weights = _ALIGN_CACHE[key]
@@ -289,6 +351,10 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
     def fit(self, X, y):
         # MinMax scaling to [0, pi] is fitted on the training data only.
         self.scaler_ = MinMaxScaler(feature_range=(0, np.pi)).fit(X)
+        # Bandwidth from the training kernel only (for kernel="aligned" this
+        # is the starting bandwidth, before the per-feature weights are trained).
+        self.bandwidth_ = (self.bandwidth if self.bandwidth is not None else calibrate_bandwidth(
+            self.scaler_.transform(X), self.kernel_median, self._entangled(), self.n_reps))
         self.feature_weights_ = np.ones(X.shape[1])
         if self.kernel == "aligned":
             self.feature_weights_ = self._align(X, y)
@@ -312,24 +378,23 @@ class QuantumKernelSVC(ClassifierMixin, BaseEstimator):
 
 
 # ===========================================================================
-# 4. Model factories with hyperparameter tuning
+# 5. Model factories with hyperparameter tuning
 # ===========================================================================
 # Each grid has at most 20 combinations, the same as the classical SVM grid
 # (4 C x 5 gamma), so no quantum model gets a bigger tuning budget.
 
-# Log-spaced bandwidths, 0.01 to 0.25. At 8 qubits, bandwidths of 0.5 and 1.0
-# make the training kernel almost the identity (mean off-diagonal ~0.01): every
-# patient looks unrelated to every other, the "exponential concentration" of
-# fidelity kernels. 3-fold CV on 25 patients still sometimes picked them, so they
-# are left out. At the small end, 0.01 gives an almost constant kernel
-# (off-diagonal ~0.99), so going lower adds nothing.
-BANDWIDTHS = [0.01, 0.022, 0.05, 0.112, 0.25]  # np.geomspace(0.01, 0.25, 5), rounded
+# Target median off-diagonal training-kernel values. The middle one, e^-1 = 0.368,
+# is what the median heuristic gives an RBF kernel at the median distance. The
+# range stays away from the two degenerate kernels: almost constant (median
+# >= 0.9, every patient looks the same) and almost the identity (median near 0,
+# every patient looks unrelated to every other: "exponential concentration").
+KERNEL_MEDIANS = [0.8, 0.6, 0.368, 0.2, 0.1]
 
-FIDELITY_GRID = {"C": [0.1, 1, 10, 100], "bandwidth": BANDWIDTHS}                    # 4 x 5 = 20
-PROJECTED_GRID = {"C": [1, 10], "bandwidth": BANDWIDTHS, "gamma": ["scale", 1.0]}   # 2 x 5 x 2 = 20
-# Hybrid: 3 weights x 2 C x 3 bandwidths (smallest, middle, largest) = 18 <= 20.
+FIDELITY_GRID = {"C": [0.1, 1, 10, 100], "kernel_median": KERNEL_MEDIANS}                    # 4 x 5 = 20
+PROJECTED_GRID = {"C": [1, 10], "kernel_median": KERNEL_MEDIANS, "gamma": ["scale", 1.0]}   # 2 x 5 x 2 = 20
+# Hybrid: 3 weights x 2 C x 3 targets (highest, middle, lowest) = 18 <= 20.
 # The RBF part uses gamma="scale", scikit-learn's default for SVC.
-HYBRID_GRID = {"C": [1, 10], "bandwidth": BANDWIDTHS[::2], "weight": [0.25, 0.5, 0.75]}
+HYBRID_GRID = {"C": [1, 10], "kernel_median": KERNEL_MEDIANS[::2], "weight": [0.25, 0.5, 0.75]}
 
 
 def _tuned(kernel, grid, seed):
@@ -371,7 +436,7 @@ QUANTUM_MODELS = {
 
 
 # ===========================================================================
-# 5. PennyLane reference implementation (only used if PennyLane is installed)
+# 6. PennyLane reference implementation (only used if PennyLane is installed)
 # ===========================================================================
 
 def pennylane_states(X, n_reps=N_REPS, entangle=True):

@@ -22,7 +22,7 @@ import pandas as pd
 
 from data import load_data, make_experiment
 from quantum import make_qk_aligned, make_qk_hybrid
-from run_all import N_COMPONENTS_LIST, N_LIST, RESULTS_DIR, SEEDS, evaluate
+from run_all import N_COMPONENTS_LIST, N_LIST, RESULTS_DIR, SEEDS, chosen_bandwidth, evaluate
 
 
 def without_entanglement(factory):
@@ -58,6 +58,7 @@ def main():
                     row = {"model": name, "n_components": n_components, "N": n, "seed": seed}
                     row.update(evaluate(model, Z_test, y_te))
                     row["train_time_s"] = train_time
+                    row["bandwidth"] = chosen_bandwidth(model)
                     rows.append(row)
                     print(f"  pca={n_components} N={n:<3} seed={seed} {name:<16} "
                           f"AUROC={row['auroc']:.3f}  time={train_time:.2f}s", flush=True)
