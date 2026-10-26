@@ -1,14 +1,16 @@
 """
 analysis.py - Turns results/results.csv into plots, tables, tests and a summary.
 
-Reads (written by run_all.py):
+Reads (written by run_all.py, and ablation.py if it was run):
     results/results.csv
     results/geometric_difference.csv
+    results/ablation.csv        - optional: QK-Hybrid / QK-Aligned without entanglement
 
 Writes:
     results/learning_curves.png - AUROC vs N, one panel per number of qubits
     results/summary_table.csv   - mean ± std of AUROC, sensitivity, specificity, F1, train time
-    results/wilcoxon.csv        - paired Wilcoxon signed-rank tests (paired by seed)
+    results/stability.csv       - spread of AUROC over seeds at N=25 and N=50
+    results/wilcoxon.csv        - paired Wilcoxon signed-rank tests (paired by seed), Holm-corrected
     results/summary.txt         - plain-English summary of the results
 
 Usage:
@@ -27,8 +29,17 @@ from scipy.stats import wilcoxon
 
 RESULTS_DIR = "results"
 REFERENCE = "SVM-RBF"
-QUANTUM = ["QK-Fidelity", "QK-Projected", "QK-NoEntangle"]
-MODEL_ORDER = ["SVM-RBF", "LogReg"] + QUANTUM
+CLASSICAL = ["SVM-RBF", "LogReg"]
+QUANTUM = ["QK-Fidelity", "QK-Projected", "QK-NoEntangle", "QK-Hybrid", "QK-Aligned"]
+MODEL_ORDER = CLASSICAL + QUANTUM
+STABILITY_N = [25, 50]   # small-N settings where the spread over seeds matters most
+RIVAL_MARGIN = 0.01      # "rivals" SVM-RBF = mean AUROC within +-this; "beats" = more than this higher
+ALPHA = 0.05
+# Entanglement ablations: model with ZZ gates vs the same model without them.
+# The -NoEnt models come from ablation.py and are only used in these tests.
+ENTANGLEMENT_PAIRS = [("QK-Fidelity", "QK-NoEntangle"),
+                      ("QK-Hybrid", "QK-Hybrid-NoEnt"),
+                      ("QK-Aligned", "QK-Aligned-NoEnt")]
 
 # Fixed colour per model (colourblind-checked categorical palette), plus a
 # distinct marker and line style so models are not identified by colour alone.
@@ -38,6 +49,8 @@ STYLE = {
     "QK-Fidelity":   dict(color="#1baf7a", marker="^", linestyle="-"),
     "QK-Projected":  dict(color="#eda100", marker="D", linestyle="-"),
     "QK-NoEntangle": dict(color="#e87ba4", marker="v", linestyle="-"),
+    "QK-Hybrid":     dict(color="#008300", marker="P", linestyle="-"),
+    "QK-Aligned":    dict(color="#6250d6", marker="X", linestyle="-"),
 }
 METRICS = {"auroc": "AUROC", "sensitivity": "Sensitivity", "specificity": "Specificity",
            "f1": "F1", "train_time_s": "Train time (s)"}
@@ -51,16 +64,16 @@ def plot_learning_curves(df, path):
     """AUROC vs N (mean ± std over seeds), one panel per number of qubits."""
     n_list = sorted(df["N"].unique())
     pca_list = sorted(df["n_components"].unique())
-    fig, axes = plt.subplots(1, len(pca_list), figsize=(6 * len(pca_list), 4.5), sharey=True)
+    fig, axes = plt.subplots(1, len(pca_list), figsize=(6.5 * len(pca_list), 5), sharey=True)
 
     for ax, n_comp in zip(np.atleast_1d(axes), pca_list):
         sub = df[df["n_components"] == n_comp]
         for k, model in enumerate(MODEL_ORDER):
             stats = sub[sub["model"] == model].groupby("N")["auroc"].agg(["mean", "std"])
             # small horizontal offset per model so the error bars don't overlap
-            x = stats.index.values * (1 + 0.035 * (k - 2))
+            x = stats.index.values * (1 + 0.025 * (k - (len(MODEL_ORDER) - 1) / 2))
             ax.errorbar(x, stats["mean"], yerr=stats["std"], label=model, linewidth=2,
-                        markersize=7, capsize=3, elinewidth=1.2, **STYLE[model])
+                        markersize=7, capsize=2, elinewidth=1, **STYLE[model])
         ax.set_xscale("log")
         ax.set_xticks(n_list)
         ax.set_xticklabels([str(n) for n in n_list])
@@ -74,9 +87,9 @@ def plot_learning_curves(df, path):
 
     np.atleast_1d(axes)[0].set_ylabel("Test AUROC (mean ± std, 5 seeds)")
     handles, labels = np.atleast_1d(axes)[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=len(MODEL_ORDER), frameon=False)
+    fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False)
     fig.suptitle("Pneumonia detection with few training patients: classical vs quantum kernels")
-    fig.tight_layout(rect=(0, 0.07, 1, 1))
+    fig.tight_layout(rect=(0, 0.1, 1, 1))
     fig.savefig(path, dpi=200)
     plt.close(fig)
 
@@ -97,7 +110,30 @@ def summary_table(df):
 
 
 # ---------------------------------------------------------------------------
-# 3. Wilcoxon signed-rank tests
+# 3. Stability: spread of AUROC over seeds
+# ---------------------------------------------------------------------------
+
+def stability_table(df):
+    """Std and range (max - min) of test AUROC over the 5 seeds, at small N.
+
+    A model whose AUROC depends a lot on which 25 patients it was given is
+    less trustworthy, even if its mean is good. std_vs_svm < 1 means the
+    model is more stable than SVM-RBF in that setting.
+    """
+    sub = df[df["N"].isin(STABILITY_N)]
+    g = sub.groupby(["n_components", "N", "model"])["auroc"]
+    table = pd.DataFrame({"auroc_mean": g.mean(), "auroc_std": g.std(),
+                          "auroc_range": g.max() - g.min()}).reset_index()
+    svm_std = table[table["model"] == REFERENCE].set_index(["n_components", "N"])["auroc_std"]
+    table["std_vs_svm"] = table["auroc_std"] / svm_std.reindex(
+        pd.MultiIndex.from_frame(table[["n_components", "N"]])).values
+    table["type"] = np.where(table["model"].isin(QUANTUM), "quantum", "classical")
+    table["model"] = pd.Categorical(table["model"], MODEL_ORDER)
+    return table.sort_values(["n_components", "N", "model"]).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# 4. Wilcoxon signed-rank tests
 # ---------------------------------------------------------------------------
 
 def paired_test(df, model_a, model_b, pair_keys):
@@ -114,14 +150,38 @@ def paired_test(df, model_a, model_b, pair_keys):
     return diff.mean(), wilcoxon(a, b).pvalue, len(diff)
 
 
+def holm(p_values):
+    """Holm-Bonferroni adjusted p-values (NaN entries are ignored).
+
+    Sort the m p-values; the k-th smallest (k = 0, 1, ...) is multiplied by
+    (m - k), and a running maximum keeps the adjusted values in order.
+    Controls the chance of ANY false positive in the family at alpha.
+    """
+    p = np.asarray(p_values, dtype=float)
+    adjusted = np.full_like(p, np.nan)
+    valid = np.where(~np.isnan(p))[0]
+    order = valid[np.argsort(p[valid])]
+    m = len(order)
+    running = 0.0
+    for k, i in enumerate(order):
+        running = max(running, (m - k) * p[i])
+        adjusted[i] = min(1.0, running)
+    return adjusted
+
+
 def wilcoxon_tests(df):
-    """Each quantum model vs SVM-RBF, plus the entanglement ablation
-    (QK-Fidelity vs QK-NoEntangle).
+    """Each quantum model vs SVM-RBF, plus the entanglement ablations
+    (each entangled model vs the same model without ZZ gates, when available).
 
     Per (n_components, N): paired by seed (5 pairs).
     'all' rows: pooled over N, paired by (N, seed) (20 pairs) - more power.
+
+    Holm correction is applied separately to two families: the pooled tests
+    (the ones to report) and the per-N tests.
     """
-    comparisons = [(q, REFERENCE) for q in QUANTUM] + [("QK-Fidelity", "QK-NoEntangle")]
+    available = set(df["model"])
+    comparisons = [(q, REFERENCE) for q in QUANTUM] + [
+        (a, b) for a, b in ENTANGLEMENT_PAIRS if a in available and b in available]
     rows = []
     for model_a, model_b in comparisons:
         for n_comp in sorted(df["n_components"].unique()):
@@ -132,50 +192,129 @@ def wilcoxon_tests(df):
                 diff, p, n_pairs = paired_test(data, model_a, model_b, keys)
                 rows.append({"model": model_a, "vs": model_b, "n_components": n_comp, "N": n,
                              "mean_auroc_diff": diff, "p_value": p, "n_pairs": n_pairs})
-    return pd.DataFrame(rows)
+    tests = pd.DataFrame(rows)
+    pooled = tests["N"] == "all"
+    tests["p_holm"] = np.nan
+    for family in (pooled, ~pooled):
+        tests.loc[family, "p_holm"] = holm(tests.loc[family, "p_value"])
+    return tests
 
 
 # ---------------------------------------------------------------------------
-# 4. Plain-English summary
+# 5. Plain-English summary
 # ---------------------------------------------------------------------------
 
-def describe(diff, p, alpha=0.05):
-    """Turn an AUROC difference and p-value into words."""
-    direction = "higher" if diff > 0 else "lower"
+def describe(r):
+    """Turn a test row (AUROC difference, raw and Holm p-value) into words."""
+    diff, p, p_holm = r["mean_auroc_diff"], r["p_value"], r["p_holm"]
     if np.isnan(p):
         return "identical"
-    if p < alpha:
-        return f"significantly {direction} (diff {diff:+.3f}, p = {p:.3f})"
-    return f"not significantly different (diff {diff:+.3f}, p = {p:.3f})"
+    direction = "higher" if diff > 0 else "lower"
+    stats = f"diff {diff:+.3f}, p = {p:.3f}, Holm p = {p_holm:.3f}"
+    if p_holm < ALPHA:
+        return f"significantly {direction} ({stats})"
+    if p < ALPHA:
+        return f"{direction}, but not significant after Holm correction ({stats})"
+    return f"not significantly different ({stats})"
 
 
-def write_summary(df, tests, gdf):
+def write_summary(df, tests, stability, gdf):
     lines = []
     mean_auroc = df.groupby(["n_components", "N", "model"])["auroc"].mean()
+    settings = list(mean_auroc.groupby(level=["n_components", "N"]).groups)
+    pooled = tests[tests["N"] == "all"]
+    vs_svm = pooled[pooled["vs"] == REFERENCE]
+    ent = pooled[pooled["vs"] != REFERENCE]
+
+    lines.append("BOTTOM LINE")
+    for n_comp, grp in vs_svm.groupby("n_components"):
+        best = grp.loc[grp["mean_auroc_diff"].idxmax()]
+        lines.append(f"  {n_comp} qubits: best quantum model vs SVM-RBF (pooled over N) is {best['model']}, "
+                     f"{best['mean_auroc_diff']:+.3f} AUROC, Holm p = {best['p_holm']:.3f}.")
+    n_sig = int(((vs_svm["p_holm"] < ALPHA) & (vs_svm["mean_auroc_diff"] > 0)).sum())
+    lines.append(f"  {n_sig} of {len(vs_svm)} quantum-vs-SVM-RBF comparisons are significantly better "
+                 f"after Holm correction.")
+    if len(ent):
+        ent_better = int(((ent["p_holm"] < ALPHA) & (ent["mean_auroc_diff"] > 0)).sum())
+        ent_worse = int(((ent["p_holm"] < ALPHA) & (ent["mean_auroc_diff"] < 0)).sum())
+        lines.append(f"  Entanglement (ZZ gates) significantly helped in {ent_better} and significantly hurt "
+                     f"in {ent_worse} of {len(ent)} with/without-ZZ comparisons.")
+        no_ent = {b for _, b in ENTANGLEMENT_PAIRS}
+        best_models = set(vs_svm.loc[vs_svm.groupby("n_components")["mean_auroc_diff"].idxmax(), "model"])
+        if best_models <= no_ent:
+            lines.append("  The best quantum model uses no entanglement at all, so any edge it has is not")
+            lines.append("  a quantum effect: its kernel can be computed classically.")
+    lines.append("")
 
     lines.append("WHO WON WHERE (highest mean test AUROC over 5 seeds)")
-    for (n_comp, n), group in mean_auroc.groupby(level=["n_components", "N"]):
-        group = group.droplevel(["n_components", "N"]).sort_values(ascending=False)
+    q_wins = 0
+    for n_comp, n in settings:
+        group = mean_auroc.loc[(n_comp, n)].sort_values(ascending=False)
         best_q = group[QUANTUM].idxmax()
+        q_wins += group.index[0] in QUANTUM
         lines.append(f"  {n_comp} qubits, N={n:<3}: winner {group.index[0]} ({group.iloc[0]:.3f}); "
                      f"best quantum {best_q} ({group[best_q]:.3f}) vs SVM-RBF ({group[REFERENCE]:.3f})")
-    n_cells = len(mean_auroc.groupby(level=["n_components", "N"]))
-    q_wins = sum(g.droplevel(["n_components", "N"]).idxmax() in QUANTUM
-                 for _, g in mean_auroc.groupby(level=["n_components", "N"]))
-    lines.append(f"  -> A quantum model had the best mean AUROC in {q_wins} of {n_cells} settings.")
+    lines.append(f"  -> A quantum model had the best mean AUROC in {q_wins} of {len(settings)} settings.")
 
     lines.append("")
-    lines.append("QUANTUM vs SVM-RBF (Wilcoxon signed-rank, pooled over N, 20 pairs)")
-    pooled = tests[tests["N"] == "all"]
-    for _, r in pooled[pooled["vs"] == REFERENCE].iterrows():
-        lines.append(f"  {r['n_components']} qubits: {r['model']} is "
-                     f"{describe(r['mean_auroc_diff'], r['p_value'])} than SVM-RBF")
+    lines.append(f"WHICH QUANTUM MODEL RIVALS OR BEATS SVM-RBF? (mean AUROC difference; "
+                 f"'beats' = more than {RIVAL_MARGIN} higher, 'rivals' = within +-{RIVAL_MARGIN})")
+    for q in QUANTUM:
+        groups = {"beats": [], "rivals": [], "behind": []}
+        for n_comp, n in settings:
+            d = mean_auroc[(n_comp, n, q)] - mean_auroc[(n_comp, n, REFERENCE)]
+            word = "beats" if d > RIVAL_MARGIN else "rivals" if d >= -RIVAL_MARGIN else "behind"
+            groups[word].append(f"{n_comp}q N={n} ({d:+.3f})")
+        lines.append(f"  {q}:")
+        for word, items in groups.items():
+            lines.append(f"    {word:<7} {len(items)}/{len(settings)}: {', '.join(items) or '-'}")
 
     lines.append("")
-    lines.append("DID ENTANGLEMENT HELP? (QK-Fidelity vs QK-NoEntangle, pooled over N)")
-    for _, r in pooled[pooled["vs"] == "QK-NoEntangle"].iterrows():
-        lines.append(f"  {r['n_components']} qubits: with entanglement, AUROC is "
-                     f"{describe(r['mean_auroc_diff'], r['p_value'])}")
+    lines.append("IS IT SIGNIFICANT? Quantum vs SVM-RBF (Wilcoxon signed-rank, pooled over N,")
+    lines.append(f"20 pairs per qubit count; Holm correction over all {len(pooled)} pooled tests)")
+    for _, r in vs_svm.iterrows():
+        lines.append(f"  {r['n_components']} qubits: {r['model']:<13} is {describe(r)} than SVM-RBF")
+    sig_better = vs_svm[(vs_svm["p_holm"] < ALPHA) & (vs_svm["mean_auroc_diff"] > 0)]
+    if len(sig_better):
+        names = ", ".join(f"{r['model']} ({r['n_components']} qubits)" for _, r in sig_better.iterrows())
+        lines.append(f"  -> Significantly better than SVM-RBF after Holm correction: {names}.")
+    else:
+        lines.append("  -> No quantum model is significantly better than SVM-RBF after Holm correction.")
+
+    lines.append("")
+    lines.append(f"STABILITY: spread (std) of test AUROC over the 5 seeds at N = "
+                 f"{', '.join(map(str, STABILITY_N))}")
+    lines.append("  In brackets: ratio to SVM-RBF's std (< 1 = more stable than SVM-RBF).")
+    for (n_comp, n), grp in stability.groupby(["n_components", "N"], observed=True):
+        cells = [f"{r['model']} {r['auroc_std']:.3f}"
+                 + ("" if r["model"] == REFERENCE else f" [{r['std_vs_svm']:.2f}]")
+                 for _, r in grp.iterrows()]
+        lines.append(f"  {n_comp} qubits, N={n:<3}: " + ", ".join(cells))
+    median_std = stability.groupby("type")["auroc_std"].median()
+    lines.append(f"  Median std over these settings: classical {median_std['classical']:.3f}, "
+                 f"quantum {median_std['quantum']:.3f}.")
+    for q in QUANTUM:
+        ratios = stability[stability["model"] == q]["std_vs_svm"]
+        lines.append(f"  {q:<13}: spread smaller than SVM-RBF in {int((ratios < 1).sum())} of "
+                     f"{len(ratios)} settings (median ratio {ratios.median():.2f})")
+    lines.append("  Caution: a std from 5 seeds is itself uncertain by roughly +-35%, so only")
+    lines.append("  ratios well away from 1 (below 0.5 or above 2) mean much.")
+
+    lines.append("")
+    lines.append("DID ENTANGLEMENT HELP? (same model with vs without ZZ gates, pooled over N)")
+    for _, r in ent.iterrows():
+        lines.append(f"  {r['n_components']} qubits: {r['model']} vs {r['vs']}: with entanglement, "
+                     f"AUROC is {describe(r)}")
+    missing = [a for a, _ in ENTANGLEMENT_PAIRS if a not in set(ent["model"])]
+    if missing:
+        lines.append(f"  (no ablation for {', '.join(missing)}: run ablation.py)")
+    if len(ent):
+        helped = ent[(ent["p_holm"] < ALPHA) & (ent["mean_auroc_diff"] > 0)]
+        hurt = ent[(ent["p_holm"] < ALPHA) & (ent["mean_auroc_diff"] < 0)]
+        lines.append(f"  -> Entanglement significantly helped in {len(helped)} and significantly hurt "
+                     f"in {len(hurt)} of {len(ent)} comparisons.")
+    lines.append("  Without ZZ gates every patient is a product state, and the fidelity kernel")
+    lines.append("  is a product of one-qubit cos^2 terms that a classical computer evaluates directly.")
 
     lines.append("")
     lines.append("GEOMETRIC DIFFERENCE g(K_classical || K_quantum) (Huang et al. 2021)")
@@ -196,23 +335,29 @@ def write_summary(df, tests, gdf):
 def main():
     df = pd.read_csv(os.path.join(RESULTS_DIR, "results.csv"))
     gdf = pd.read_csv(os.path.join(RESULTS_DIR, "geometric_difference.csv"))
+    ablation_path = os.path.join(RESULTS_DIR, "ablation.csv")
+    ablation = pd.read_csv(ablation_path) if os.path.exists(ablation_path) else df.iloc[:0]
 
     plot_learning_curves(df, os.path.join(RESULTS_DIR, "learning_curves.png"))
 
     table = summary_table(df)
     table.to_csv(os.path.join(RESULTS_DIR, "summary_table.csv"), index=False)
 
-    tests = wilcoxon_tests(df)
+    stability = stability_table(df)
+    stability.to_csv(os.path.join(RESULTS_DIR, "stability.csv"), index=False)
+
+    tests = wilcoxon_tests(pd.concat([df, ablation], ignore_index=True))
     tests.to_csv(os.path.join(RESULTS_DIR, "wilcoxon.csv"), index=False)
 
-    summary = write_summary(df, tests, gdf)
+    summary = write_summary(df, tests, stability, gdf)
     with open(os.path.join(RESULTS_DIR, "summary.txt"), "w", encoding="utf-8") as f:
         f.write(summary + "\n")
 
     print(table.to_string(index=False))
     print()
     print(summary)
-    print(f"\nSaved learning_curves.png, summary_table.csv, wilcoxon.csv and summary.txt to {RESULTS_DIR}/")
+    print(f"\nSaved learning_curves.png, summary_table.csv, stability.csv, wilcoxon.csv and "
+          f"summary.txt to {RESULTS_DIR}/")
 
 
 if __name__ == "__main__":
