@@ -1,0 +1,37 @@
+WHO WON WHERE (highest mean test AUROC over 5 seeds)
+  4 qubits, N=25 : winner QK-NoEntangle (0.892); best quantum QK-NoEntangle (0.892) vs SVM-RBF (0.882)
+  4 qubits, N=50 : winner LogReg (0.899); best quantum QK-NoEntangle (0.893) vs SVM-RBF (0.878)
+  4 qubits, N=100: winner QK-NoEntangle (0.913); best quantum QK-NoEntangle (0.913) vs SVM-RBF (0.903)
+  4 qubits, N=200: winner LogReg (0.909); best quantum QK-NoEntangle (0.887) vs SVM-RBF (0.891)
+  8 qubits, N=25 : winner QK-NoEntangle (0.909); best quantum QK-NoEntangle (0.909) vs SVM-RBF (0.897)
+  8 qubits, N=50 : winner QK-NoEntangle (0.905); best quantum QK-NoEntangle (0.905) vs SVM-RBF (0.880)
+  8 qubits, N=100: winner QK-NoEntangle (0.925); best quantum QK-NoEntangle (0.925) vs SVM-RBF (0.918)
+  8 qubits, N=200: winner SVM-RBF (0.908); best quantum QK-NoEntangle (0.901) vs SVM-RBF (0.908)
+  -> A quantum model had the best mean AUROC in 5 of 8 settings.
+
+QUANTUM vs SVM-RBF (Wilcoxon signed-rank, pooled over N, 20 pairs)
+  4 qubits: QK-Fidelity is not significantly different (diff -0.017, p = 0.154) than SVM-RBF
+  8 qubits: QK-Fidelity is not significantly different (diff -0.032, p = 0.177) than SVM-RBF
+  4 qubits: QK-Projected is not significantly different (diff -0.005, p = 0.956) than SVM-RBF
+  8 qubits: QK-Projected is not significantly different (diff -0.005, p = 0.452) than SVM-RBF
+  4 qubits: QK-NoEntangle is not significantly different (diff +0.008, p = 0.261) than SVM-RBF
+  8 qubits: QK-NoEntangle is significantly higher (diff +0.009, p = 0.030) than SVM-RBF
+
+DID ENTANGLEMENT HELP? (QK-Fidelity vs QK-NoEntangle, pooled over N)
+  4 qubits: with entanglement, AUROC is significantly lower (diff -0.025, p = 0.017)
+  8 qubits: with entanglement, AUROC is significantly lower (diff -0.042, p = 0.003)
+
+GEOMETRIC DIFFERENCE g(K_classical || K_quantum) (Huang et al. 2021)
+  g ranges from ~1 (classical kernel can learn everything the quantum kernel can)
+  to order sqrt(N) (room for a quantum advantage). Median [min-max] over seeds:
+  4 qubits, N=25 : g = 2.49 [1.99-3.69]  (sqrt(N) = 5.0, median is 50% of it)
+  4 qubits, N=50 : g = 3.08 [2.15-6.22]  (sqrt(N) = 7.1, median is 44% of it)
+  4 qubits, N=100: g = 2.23 [1.88-2.93]  (sqrt(N) = 10.0, median is 22% of it)
+  4 qubits, N=200: g = 2.86 [2.05-4.59]  (sqrt(N) = 14.1, median is 20% of it)
+  8 qubits, N=25 : g = 3.30 [2.33-4.02]  (sqrt(N) = 5.0, median is 66% of it)
+  8 qubits, N=50 : g = 2.23 [1.78-2.81]  (sqrt(N) = 7.1, median is 32% of it)
+  8 qubits, N=100: g = 2.61 [2.00-3.19]  (sqrt(N) = 10.0, median is 26% of it)
+  8 qubits, N=200: g = 2.83 [2.25-3.70]  (sqrt(N) = 14.1, median is 20% of it)
+
+NOTE: with 5 seeds the smallest possible two-sided Wilcoxon p-value is 0.0625,
+so per-N tests in wilcoxon.csv can never reach p < 0.05; use the pooled rows.

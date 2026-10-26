@@ -1,0 +1,7 @@
+pennylane
+scikit-learn
+medmnist
+numpy
+scipy
+matplotlib
+pandas
