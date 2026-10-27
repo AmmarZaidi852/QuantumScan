@@ -10,7 +10,7 @@ Two classical models and five quantum kernel models are trained on exactly the s
 `data.py` downloads it with `medmnist`. If `medmnist` can't be imported (it needs torch, which Windows Smart App Control blocks), `data.py` reads the same official file, `data/pneumoniamnist.npz` from [Zenodo](https://zenodo.org/records/10519652) (MD5 `28209eda62fecd6e6a2d98b1501bb15f`), directly.
 
 - **Test set:** a fixed, class-balanced set of 300 images (150 per class) taken from the official test split with a fixed seed (42). Every experiment uses this same set.
-- **Training set:** for each experiment, a balanced sample of **N = 25, 50, 100 or 200** patients from the official train split, drawn with a seed (0–4).
+- **Training set:** for each experiment, a balanced sample of **N = 25, 50, 100 or 200** patients from the official train split, drawn with a seed: 0–4 for the exploratory runs, and new seeds 5–9 for the pre-registered confirmation run (see below).
 - **Features:** images are flattened (784 pixels), standardised (`StandardScaler`) and reduced with PCA to **4 or 8 components**, i.e. 4 or 8 qubits. The scaler and PCA are fitted on the training sample only.
 
 ## Models
@@ -60,7 +60,8 @@ For each model, PCA size, N and seed: **AUROC**, accuracy, **sensitivity** (pneu
 | `quantum.py` | NumPy statevector simulator, quantum kernels, `QUANTUM_MODELS`, geometric difference, PennyLane check |
 | `run_all.py` | Experiment loop; writes `results/results.csv`, `summary.csv` and `geometric_difference.csv` |
 | `ablation.py` | Entanglement ablation for QK-Hybrid and QK-Aligned; writes `results/ablation.csv` |
-| `analysis.py` | Learning-curve plot, summary and stability tables, Holm-corrected Wilcoxon tests and plain-English summary |
+| `confirm.py` | Pre-registered confirmation run: all models and the ablation on new seeds 5–9, code unchanged; writes `results/confirm/` |
+| `analysis.py` | Learning-curve plot, summary and stability tables, Holm-corrected Wilcoxon tests, the pre-registered primary test and a plain-English summary. Uses all 10 seeds when `results/confirm/` exists |
 | `QuantumScan_colab.ipynb` | Runs everything on Google Colab, including the PennyLane check |
 | `requirements.txt` | Dependencies |
 
@@ -78,6 +79,7 @@ python -m venv .venv
 .venv/bin/pip install -r requirements.txt   # Windows: .venv\Scripts\pip
 .venv/bin/python run_all.py                 # all experiments (~30 min, mostly QK-Aligned)
 .venv/bin/python ablation.py                # entanglement ablation for QK-Hybrid / QK-Aligned (~15 min)
+.venv/bin/python confirm.py                 # confirmation run on seeds 5-9 (~45 min)
 .venv/bin/python analysis.py                # plots, tables, tests, summary
 .venv/bin/python quantum.py                 # PennyLane vs NumPy check (needs PennyLane)
 ```
@@ -88,14 +90,32 @@ On Windows with Smart App Control enabled, PennyLane, torch and recent pandas wh
 
 | File | Contents |
 |---|---|
-| `results.csv` | One row per model × PCA size × N × seed, with all metrics and the calibrated bandwidth of quantum models |
+| `results.csv` | One row per model × PCA size × N × seed (seeds 0–4), with all metrics and the calibrated bandwidth of quantum models |
+| `confirm/` | `results.csv`, `ablation.csv`, `geometric_difference.csv` and `summary.csv` for the confirmation seeds 5–9 |
+| `primary_test.csv` | The pre-registered primary test on seeds 5–9, plus the same contrast on seeds 0–4 for reference |
 | `geometric_difference.csv` | g per PCA size × N × seed, with √N for reference |
 | `ablation.csv` | Same columns as `results.csv`, for `QK-Hybrid-NoEnt` and `QK-Aligned-NoEnt` |
 | `summary.csv` | Numeric mean and std of every metric |
 | `summary_table.csv` | Mean ± std of AUROC, sensitivity, specificity, F1 and training time |
 | `stability.csv` | Std and range of AUROC over seeds at N = 25 and 50, and the std relative to SVM-RBF |
 | `wilcoxon.csv` | Paired Wilcoxon signed-rank tests: each quantum model vs SVM-RBF, and each entangled model vs its no-ZZ ablation. Raw p and Holm-corrected `p_holm` |
-| `learning_curves.png` | AUROC vs N, one panel each for 4 and 8 qubits |
+| `learning_curves.png` | AUROC vs N, one panel each for 4 and 8 qubits (all 10 seeds) |
 | `summary.txt` | Plain-English summary |
 
-With 5 seeds, the smallest possible two-sided Wilcoxon p-value is 0.0625, so per-N tests can never reach p < 0.05. The pooled tests (20 pairs per PCA size) are the ones to report. Holm correction is applied separately to the pooled family and to the per-N family, and the summary calls a result significant only if its Holm-corrected p < 0.05.
+The tables, tests and plot use all 10 seeds. The pooled tests (40 pairs per PCA size) are the ones to report. Holm correction is applied separately to the pooled family and to the per-N family, and the summary calls a result significant only if its Holm-corrected p < 0.05.
+
+## Confirmation run (seeds 5–9, pre-registered)
+
+The bandwidth rule went through three versions on seeds 0–4. The last change, the cap at 1, was prompted by two collapsed runs found by looking at test results. So the one significant result on seeds 0–4 (QK-NoEntangle vs SVM-RBF at 8 qubits) could have been a product of that iteration. To check it, the analysis was repeated on new training samples with everything fixed in advance:
+
+- **Code frozen** at commit `2e46df7`. `confirm.py` (commit `549a454`, pushed before any seed 5–9 result existed) only swaps in seeds 5–9 and an output folder. Every model, grid and setting is unchanged.
+- **Primary test, fixed in advance:** QK-NoEntangle vs SVM-RBF at 8 qubits, two-sided Wilcoxon signed-rank on test AUROC, paired by (N, seed), pooled over N, seeds 5–9 only (20 pairs). One test, no correction. "Confirmed" means p < 0.05 with a positive mean difference.
+
+| Seeds | Mean AUROC difference | p | QK-NoEntangle higher |
+|---|---|---|---|
+| **5–9 (confirmation, primary)** | **+0.027** | **0.0036** | **18 of 20 pairs** |
+| 0–4 (exploratory, for reference) | +0.011 | 0.0014 | 17 of 20 pairs |
+
+**Result: confirmed.** Over all 10 seeds with Holm correction, QK-NoEntangle is significantly better than SVM-RBF at both 4 qubits (+0.017) and 8 qubits (+0.019), Holm p = 0.001 each. No other quantum model is significantly better than SVM-RBF. Adding the entangling ZZ gates significantly lowered AUROC in 5 of 6 with/without comparisons and never helped.
+
+**What it means.** The replicated edge belongs to the model *without* entanglement. Its states are product states, so its kernel is a product of one-qubit cos² terms that a classical computer evaluates directly. It's a well-calibrated classical kernel beating a tuned RBF SVM, not a quantum advantage. The gap is larger on seeds 5–9 mainly because SVM-RBF did worse on those samples (8 qubits: 0.901 → 0.886), while QK-NoEntangle stayed the same (0.912 → 0.914). An unplanned check, reported as context only: against logistic regression, QK-NoEntangle ties at 4 qubits (−0.001, p = 0.89) and is ahead at 8 qubits (+0.013, p < 0.001, uncorrected).
