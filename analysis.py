@@ -5,12 +5,16 @@ Reads (written by run_all.py, and ablation.py if it was run):
     results/results.csv
     results/geometric_difference.csv
     results/ablation.csv        - optional: QK-Hybrid / QK-Aligned without entanglement
+    results/confirm/*.csv       - optional: the same files for the confirmation seeds 5-9
+                                  (confirm.py). If present, every table, test and the plot
+                                  use all 10 seeds, plus the pre-registered primary test.
 
 Writes:
     results/learning_curves.png - AUROC vs N, one panel per number of qubits
     results/summary_table.csv   - mean ± std of AUROC, sensitivity, specificity, F1, train time
     results/stability.csv       - spread of AUROC over seeds at N=25 and N=50
     results/wilcoxon.csv        - paired Wilcoxon signed-rank tests (paired by seed), Holm-corrected
+    results/primary_test.csv    - the pre-registered confirmation test (if confirm.py was run)
     results/summary.txt         - plain-English summary of the results
 
 Usage:
@@ -28,6 +32,12 @@ import pandas as pd
 from scipy.stats import wilcoxon
 
 RESULTS_DIR = "results"
+CONFIRM_DIR = os.path.join(RESULTS_DIR, "confirm")
+# Pre-registered primary test of the confirmation run (see confirm.py): one
+# two-sided Wilcoxon test, pooled over N, on the new seeds only, no correction.
+PRIMARY = {"model": "QK-NoEntangle", "vs": "SVM-RBF", "n_components": 8}
+EXPLORATORY_SEEDS = [0, 1, 2, 3, 4]
+CONFIRM_SEEDS = [5, 6, 7, 8, 9]
 REFERENCE = "SVM-RBF"
 CLASSICAL = ["SVM-RBF", "LogReg"]
 QUANTUM = ["QK-Fidelity", "QK-Projected", "QK-NoEntangle", "QK-Hybrid", "QK-Aligned"]
@@ -85,7 +95,7 @@ def plot_learning_curves(df, path):
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
 
-    np.atleast_1d(axes)[0].set_ylabel("Test AUROC (mean ± std, 5 seeds)")
+    np.atleast_1d(axes)[0].set_ylabel(f"Test AUROC (mean ± std, {df['seed'].nunique()} seeds)")
     handles, labels = np.atleast_1d(axes)[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False)
     fig.suptitle("Pneumonia detection with few training patients: classical vs quantum kernels")
@@ -114,7 +124,7 @@ def summary_table(df):
 # ---------------------------------------------------------------------------
 
 def stability_table(df):
-    """Std and range (max - min) of test AUROC over the 5 seeds, at small N.
+    """Std and range (max - min) of test AUROC over the seeds, at small N.
 
     A model whose AUROC depends a lot on which 25 patients it was given is
     less trustworthy, even if its mean is good. std_vs_svm < 1 means the
@@ -173,8 +183,8 @@ def wilcoxon_tests(df):
     """Each quantum model vs SVM-RBF, plus the entanglement ablations
     (each entangled model vs the same model without ZZ gates, when available).
 
-    Per (n_components, N): paired by seed (5 pairs).
-    'all' rows: pooled over N, paired by (N, seed) (20 pairs) - more power.
+    Per (n_components, N): paired by seed (one pair per seed).
+    'all' rows: pooled over N, paired by (N, seed) (4 pairs per seed) - more power.
 
     Holm correction is applied separately to two families: the pooled tests
     (the ones to report) and the per-N tests.
@@ -200,6 +210,21 @@ def wilcoxon_tests(df):
     return tests
 
 
+def primary_test(df):
+    """The pre-registered confirmation test, on the confirmation seeds only.
+    The same contrast on the exploratory seeds is reported for reference."""
+    rows = []
+    for label, seeds in (("confirmation (primary)", CONFIRM_SEEDS), ("exploratory", EXPLORATORY_SEEDS)):
+        data = df[(df["n_components"] == PRIMARY["n_components"]) & df["seed"].isin(seeds)]
+        diff, p, n_pairs = paired_test(data, PRIMARY["model"], PRIMARY["vs"], ["N", "seed"])
+        wins = (data[data["model"] == PRIMARY["model"]].set_index(["N", "seed"])["auroc"]
+                - data[data["model"] == PRIMARY["vs"]].set_index(["N", "seed"])["auroc"])
+        rows.append({"seeds": label, "seed_list": " ".join(map(str, seeds)), **PRIMARY,
+                     "mean_auroc_diff": diff, "p_value": p, "n_pairs": n_pairs,
+                     "n_higher": int((wins > 0).sum())})
+    return pd.DataFrame(rows)
+
+
 # ---------------------------------------------------------------------------
 # 5. Plain-English summary
 # ---------------------------------------------------------------------------
@@ -218,15 +243,29 @@ def describe(r):
     return f"not significantly different ({stats})"
 
 
-def write_summary(df, tests, stability, gdf):
+def write_summary(df, tests, stability, gdf, primary=None):
     lines = []
+    n_seeds = df["seed"].nunique()
     mean_auroc = df.groupby(["n_components", "N", "model"])["auroc"].mean()
     settings = list(mean_auroc.groupby(level=["n_components", "N"]).groups)
     pooled = tests[tests["N"] == "all"]
     vs_svm = pooled[pooled["vs"] == REFERENCE]
     ent = pooled[pooled["vs"] != REFERENCE]
 
-    lines.append("BOTTOM LINE")
+    if primary is not None and len(primary):
+        r = primary.iloc[0]
+        confirmed = r["p_value"] < ALPHA and r["mean_auroc_diff"] > 0
+        lines.append("PRE-REGISTERED CONFIRMATION (new seeds 5-9, decided before running)")
+        lines.append(f"  {r['model']} vs {r['vs']}, {r['n_components']} qubits, two-sided Wilcoxon signed-rank,")
+        lines.append(f"  paired by (N, seed), pooled over N, seeds {r['seed_list']} only; one test, no correction.")
+        for _, row in primary.iterrows():
+            lines.append(f"  {row['seeds']:<22}: diff {row['mean_auroc_diff']:+.3f}, p = {row['p_value']:.4f}, "
+                         f"{r['model']} higher in {row['n_higher']} of {row['n_pairs']} pairs")
+        lines.append("  -> " + ("CONFIRMED: the edge replicates on new seeds." if confirmed else
+                                "NOT CONFIRMED: the edge does not replicate on new seeds at p < 0.05."))
+        lines.append("")
+
+    lines.append(f"BOTTOM LINE (all {n_seeds} seeds)")
     for n_comp, grp in vs_svm.groupby("n_components"):
         best = grp.loc[grp["mean_auroc_diff"].idxmax()]
         lines.append(f"  {n_comp} qubits: best quantum model vs SVM-RBF (pooled over N) is {best['model']}, "
@@ -246,7 +285,7 @@ def write_summary(df, tests, stability, gdf):
             lines.append("  a quantum effect: its kernel can be computed classically.")
     lines.append("")
 
-    lines.append("WHO WON WHERE (highest mean test AUROC over 5 seeds)")
+    lines.append(f"WHO WON WHERE (highest mean test AUROC over {n_seeds} seeds)")
     q_wins = 0
     for n_comp, n in settings:
         group = mean_auroc.loc[(n_comp, n)].sort_values(ascending=False)
@@ -271,7 +310,7 @@ def write_summary(df, tests, stability, gdf):
 
     lines.append("")
     lines.append("IS IT SIGNIFICANT? Quantum vs SVM-RBF (Wilcoxon signed-rank, pooled over N,")
-    lines.append(f"20 pairs per qubit count; Holm correction over all {len(pooled)} pooled tests)")
+    lines.append(f"{4 * n_seeds} pairs per qubit count; Holm correction over all {len(pooled)} pooled tests)")
     for _, r in vs_svm.iterrows():
         lines.append(f"  {r['n_components']} qubits: {r['model']:<13} is {describe(r)} than SVM-RBF")
     sig_better = vs_svm[(vs_svm["p_holm"] < ALPHA) & (vs_svm["mean_auroc_diff"] > 0)]
@@ -282,7 +321,7 @@ def write_summary(df, tests, stability, gdf):
         lines.append("  -> No quantum model is significantly better than SVM-RBF after Holm correction.")
 
     lines.append("")
-    lines.append(f"STABILITY: spread (std) of test AUROC over the 5 seeds at N = "
+    lines.append(f"STABILITY: spread (std) of test AUROC over the {n_seeds} seeds at N = "
                  f"{', '.join(map(str, STABILITY_N))}")
     lines.append("  In brackets: ratio to SVM-RBF's std (< 1 = more stable than SVM-RBF).")
     for (n_comp, n), grp in stability.groupby(["n_components", "N"], observed=True):
@@ -297,8 +336,9 @@ def write_summary(df, tests, stability, gdf):
         ratios = stability[stability["model"] == q]["std_vs_svm"]
         lines.append(f"  {q:<13}: spread smaller than SVM-RBF in {int((ratios < 1).sum())} of "
                      f"{len(ratios)} settings (median ratio {ratios.median():.2f})")
-    lines.append("  Caution: a std from 5 seeds is itself uncertain by roughly +-35%, so only")
-    lines.append("  ratios well away from 1 (below 0.5 or above 2) mean much.")
+    rel_err = 100 / np.sqrt(2 * (n_seeds - 1))  # approx. relative standard error of a sample std
+    lines.append(f"  Caution: a std from {n_seeds} seeds is itself uncertain by roughly +-{rel_err:.0f}%, so only")
+    lines.append("  ratios well away from 1 mean much.")
 
     lines.append("")
     lines.append("DID ENTANGLEMENT HELP? (same model with vs without ZZ gates, pooled over N)")
@@ -335,16 +375,31 @@ def write_summary(df, tests, stability, gdf):
                      f"  (sqrt(N) = {r['sqrt_N']:.1f}, median is {100 * r['g'] / r['sqrt_N']:.0f}% of it)")
 
     lines.append("")
-    lines.append("NOTE: with 5 seeds the smallest possible two-sided Wilcoxon p-value is 0.0625,")
-    lines.append("so per-N tests in wilcoxon.csv can never reach p < 0.05; use the pooled rows.")
+    lines.append(f"NOTE: with {n_seeds} seeds the smallest possible two-sided Wilcoxon p-value per N is "
+                 f"{2 / 2 ** n_seeds:.4f};")
+    lines.append("the pooled rows (all N together) are the ones to report.")
     return "\n".join(lines)
 
 
 def main():
-    df = pd.read_csv(os.path.join(RESULTS_DIR, "results.csv"))
-    gdf = pd.read_csv(os.path.join(RESULTS_DIR, "geometric_difference.csv"))
-    ablation_path = os.path.join(RESULTS_DIR, "ablation.csv")
-    ablation = pd.read_csv(ablation_path) if os.path.exists(ablation_path) else df.iloc[:0]
+    def load(name, required=True):
+        """One results file, with the confirmation seeds appended when they exist."""
+        parts = [os.path.join(d, name) for d in (RESULTS_DIR, CONFIRM_DIR)]
+        frames = [pd.read_csv(path) for path in parts if os.path.exists(path)]
+        if not frames and not required:
+            return None
+        return pd.concat(frames, ignore_index=True)
+
+    df = load("results.csv")
+    gdf = load("geometric_difference.csv")
+    ablation = load("ablation.csv", required=False)
+    if ablation is None:
+        ablation = df.iloc[:0]
+
+    primary = None
+    if df["seed"].isin(CONFIRM_SEEDS).any():
+        primary = primary_test(df)
+        primary.to_csv(os.path.join(RESULTS_DIR, "primary_test.csv"), index=False)
 
     plot_learning_curves(df, os.path.join(RESULTS_DIR, "learning_curves.png"))
 
@@ -357,7 +412,7 @@ def main():
     tests = wilcoxon_tests(pd.concat([df, ablation], ignore_index=True))
     tests.to_csv(os.path.join(RESULTS_DIR, "wilcoxon.csv"), index=False)
 
-    summary = write_summary(df, tests, stability, gdf)
+    summary = write_summary(df, tests, stability, gdf, primary)
     with open(os.path.join(RESULTS_DIR, "summary.txt"), "w", encoding="utf-8") as f:
         f.write(summary + "\n")
 
