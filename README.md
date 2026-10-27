@@ -110,7 +110,8 @@ The tables, tests and plot use all 10 seeds. The pooled tests (40 pairs per PCA 
 
 The bandwidth rule went through three versions on seeds 0–4. The last change, the cap at 1, was prompted by two collapsed runs found by looking at test results. So the one significant result on seeds 0–4 (QK-NoEntangle vs SVM-RBF at 8 qubits) could have been a product of that iteration. To check it, the analysis was repeated on new training samples with everything fixed in advance:
 
-- **Code frozen** at commit `7a80281`. `confirm.py` (commit `2a563b5`, pushed before any seed 5–9 result existed) only swaps in seeds 5–9 and an output folder. Every model, grid and setting is unchanged.
+- **Code frozen** at commit `7a80281`. `confirm.py` (commit `2a563b5`; originally pushed as `549a454` before any seed 5–9 result existed) only swaps in seeds 5–9 and an output folder. Every model, grid and setting is unchanged.
+- Commit messages were later edited to remove tool attribution (contents unchanged); the pre-registration was originally pushed as `549a454`.
 - **Primary test, fixed in advance:** QK-NoEntangle vs SVM-RBF at 8 qubits, two-sided Wilcoxon signed-rank on test AUROC, paired by (N, seed), pooled over N, seeds 5–9 only (20 pairs). One test, no correction. "Confirmed" means p < 0.05 with a positive mean difference.
 
 | Seeds | Mean AUROC difference | p | QK-NoEntangle higher |
