@@ -21,17 +21,21 @@ All SVMs are tuned with `GridSearchCV`, stratified 3-fold CV and AUROC scoring, 
 |---|---|---|---|
 | `SVM-RBF` | classical | SVM with RBF kernel | C ∈ {0.1, 1, 10, 100} × gamma ∈ {scale, 0.001, 0.01, 0.1, 1} |
 | `LogReg` | classical | Logistic regression (L2, C = 1), simple reference | none |
-| `QK-Fidelity` | quantum | Fidelity kernel \|⟨ψ(x)\|ψ(x′)⟩\|² of the ZZ feature map (Havlíček et al., 2019) | C ∈ {0.1, 1, 10, 100} × bandwidth ∈ {0.01, 0.022, 0.05, 0.112, 0.25} (20) |
-| `QK-Projected` | quantum | Same circuit; each patient is represented by ⟨X⟩, ⟨Y⟩, ⟨Z⟩ of every qubit, then an RBF kernel is applied (projected quantum kernel, Huang et al., 2021) | C ∈ {1, 10} × bandwidth (5) × gamma ∈ {scale, 1} (20) |
+| `QK-Fidelity` | quantum | Fidelity kernel \|⟨ψ(x)\|ψ(x′)⟩\|² of the ZZ feature map (Havlíček et al., 2019) | C ∈ {0.1, 1, 10, 100} × target median kernel ∈ {0.8, 0.6, 0.368, 0.2, 0.1} (20) |
+| `QK-Projected` | quantum | Same circuit; each patient is represented by ⟨X⟩, ⟨Y⟩, ⟨Z⟩ of every qubit, then an RBF kernel is applied (projected quantum kernel, Huang et al., 2021) | C ∈ {1, 10} × target median kernel (5) × gamma ∈ {scale, 1} (20) |
 | `QK-NoEntangle` | quantum | Same as QK-Fidelity without the ZZ gates; ablation that tests whether entanglement matters | same as QK-Fidelity (20) |
-| `QK-Hybrid` | quantum + classical | K = w·K_fidelity + (1 − w)·K_RBF, with the RBF part on the PCA features (gamma = scale). Tests whether the quantum kernel adds anything to the classical one | w ∈ {0.25, 0.5, 0.75} × C ∈ {1, 10} × bandwidth ∈ {0.01, 0.05, 0.25} (18) |
+| `QK-Hybrid` | quantum + classical | K = w·K_fidelity + (1 − w)·K_RBF, with the RBF part on the PCA features (gamma = scale). Tests whether the quantum kernel adds anything to the classical one | w ∈ {0.25, 0.5, 0.75} × C ∈ {1, 10} × target median kernel ∈ {0.8, 0.368, 0.1} (18) |
 | `QK-Aligned` | quantum | QK-Fidelity with one trainable scaling weight per feature inside the ZZ feature map, fitted by maximising kernel-target alignment (quantum kernel alignment, Hubregtsen et al., 2022) | same as QK-Fidelity (20) |
 
 **Quantum encoding.** The PCA features are MinMax-scaled to [0, π] (fitted on the training sample only) and multiplied by the bandwidth. They are then encoded with the ZZ feature map, repeated twice. Each repetition applies H on every qubit, then RZ(xᵢ) on qubit i, then ZZ((π − xᵢ)(π − xⱼ)) between neighbouring qubits. A smaller bandwidth gives a smoother kernel, which counters the "exponential concentration" of fidelity kernels (Shaydulin & Wild, 2022).
 
-**Bandwidth grid.** The bandwidths are log-spaced from 0.01 to 0.25 (`np.geomspace(0.01, 0.25, 5)`). An earlier grid went up to 1.0. At 8 qubits, bandwidths of 0.5 and 1.0 make the training kernel almost the identity (mean off-diagonal ≈ 0.01), and 3-fold CV on 25 patients still sometimes chose them. That pulled QK-Fidelity down to AUROC 0.78 at 8 qubits, N = 25. Going below 0.01 adds nothing, because the kernel is then almost constant.
+**Bandwidth: calibrated on training data only.** There is no fixed list of bandwidths. Like the median heuristic for RBF kernels, the bandwidth is set from the data. CV tunes a *target median off-diagonal value* of the fidelity kernel on the training data, one of {0.8, 0.6, 0.368, 0.2, 0.1}. In every fit, including each CV fold, `calibrate_bandwidth` solves for the bandwidth that gives this median on that training data. It scans log-spaced bandwidths from 0.001 to 2, takes the first crossing and interpolates. The middle target, e⁻¹ ≈ 0.368, is what the RBF median heuristic gives at the median distance. The range avoids the two degenerate kernels: almost constant (every patient looks the same) and almost the identity (every patient looks unrelated, the "exponential concentration" of fidelity kernels). Each model is calibrated on its own kernel, so QK-NoEntangle gets larger bandwidths than QK-Fidelity for the same target. The bandwidth each tuned model ends up with is stored in the `bandwidth` column of `results.csv`.
 
-**Kernel alignment (QK-Aligned).** Each feature gets a weight wᵢ, so the circuit angle is bandwidth · wᵢ · xᵢ, also inside the ZZ terms. Starting from all wᵢ = 1, which is QK-Fidelity, L-BFGS-B maximises the kernel-target alignment ⟨K, yyᵀ⟩ / (‖K‖ · ‖yyᵀ‖) on the training sample. It runs at most 10 iterations and 100 loss evaluations, with wᵢ ∈ [0, 5]. Inside cross-validation, the weights are refitted on each training fold. The start point is fixed, so the result is deterministic.
+An earlier version used a fixed list (0.01–0.25) that was cut down after looking at test AUROC. That was test-set peeking, and this rule replaces it.
+
+*Known issue:* the scan goes up to bandwidth 2, but features are scaled to [0, π]. Above bandwidth 1, angles pass π and the encoding wraps around: at bandwidth 2, the lowest and highest value of a feature give the same state. The median-kernel curve then stops being monotone. For QK-NoEntangle, which needs larger bandwidths, low targets sometimes land in this region. Two runs collapsed: AUROC 0.54 at 4 qubits, N = 50, seed 4 (bandwidth 1.96) and AUROC 0.76 at 8 qubits, N = 200, seed 1 (bandwidth 1.67). Capping the scan at bandwidth 1 would fix this, but the problem was found by inspecting test results, so the results here are reported without that change.
+
+**Kernel alignment (QK-Aligned).** Each feature gets a weight wᵢ, so the circuit angle is bandwidth · wᵢ · xᵢ, also inside the ZZ terms. The bandwidth is calibrated first, with all wᵢ = 1. Starting from all wᵢ = 1, which is QK-Fidelity, L-BFGS-B maximises the kernel-target alignment ⟨K, yyᵀ⟩ / (‖K‖ · ‖yyᵀ‖) on the training sample. It runs at most 10 iterations and 100 loss evaluations, with wᵢ ∈ [0, 5]. Inside cross-validation, the weights are refitted on each training fold. The start point is fixed, so the result is deterministic.
 
 **Entanglement ablations.** `QK-NoEntangle` answers "does entanglement matter?" for QK-Fidelity. `ablation.py` asks the same question for QK-Hybrid and QK-Aligned by rerunning them without ZZ gates (`QK-Hybrid-NoEnt`, `QK-Aligned-NoEnt`) on the same samples and grids. Without ZZ gates each patient is a product state, so the kernel is a product of one-qubit terms that a classical computer evaluates directly.
 
@@ -82,7 +86,7 @@ On Windows with Smart App Control enabled, PennyLane, torch and recent pandas wh
 
 | File | Contents |
 |---|---|
-| `results.csv` | One row per model × PCA size × N × seed, with all metrics |
+| `results.csv` | One row per model × PCA size × N × seed, with all metrics and the calibrated bandwidth of quantum models |
 | `geometric_difference.csv` | g per PCA size × N × seed, with √N for reference |
 | `ablation.csv` | Same columns as `results.csv`, for `QK-Hybrid-NoEnt` and `QK-Aligned-NoEnt` |
 | `summary.csv` | Numeric mean and std of every metric |
