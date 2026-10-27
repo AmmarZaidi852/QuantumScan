@@ -4,6 +4,8 @@ Comparing classical and quantum machine learning for **pneumonia detection from 
 
 Two classical models and five quantum kernel models are trained on exactly the same features, training samples, seeds and test set. Each is evaluated as the number of training patients grows from 25 to 200.
 
+Developed with the assistance of Claude Code (AI); problem framing, experimental design and analysis were directed and reviewed by the author.
+
 ## Data
 
 [PneumoniaMNIST](https://medmnist.com/) (MedMNIST v3): 28×28 grayscale chest X-rays, labelled normal (0) or pneumonia (1).
