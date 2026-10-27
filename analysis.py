@@ -316,6 +316,14 @@ def write_summary(df, tests, stability, gdf):
     lines.append("  Without ZZ gates every patient is a product state, and the fidelity kernel")
     lines.append("  is a product of one-qubit cos^2 terms that a classical computer evaluates directly.")
 
+    if "bandwidth" in df.columns:
+        lines.append("")
+        lines.append("BANDWIDTH CHOSEN (calibrated on training data only; median [min-max] over N and seeds)")
+        bw = df[df["model"].isin(QUANTUM)].groupby(["n_components", "model"])["bandwidth"]
+        for (n_comp, model), values in bw:
+            lines.append(f"  {n_comp} qubits, {model:<13}: {values.median():.3f} "
+                         f"[{values.min():.3f}-{values.max():.3f}]")
+
     lines.append("")
     lines.append("GEOMETRIC DIFFERENCE g(K_classical || K_quantum) (Huang et al. 2021)")
     lines.append("  g ranges from ~1 (classical kernel can learn everything the quantum kernel can)")
