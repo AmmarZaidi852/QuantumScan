@@ -195,7 +195,13 @@ def geometric_difference(K_classical, K_quantum, reg=1e-2):
 # Because the rule only looks at the training kernel, the same target gives
 # different bandwidths for 4 and 8 qubits and for different training samples.
 
-BANDWIDTH_SCAN = np.geomspace(1e-3, 2.0, 41)  # bandwidths tried when calibrating
+# Bandwidths tried when calibrating, capped at 1. Features are scaled to
+# [0, pi], so with bandwidth <= 1 every angle stays in [0, pi] and the encoding
+# is injective over the data range. Above 1 the angles pass pi and wrap around:
+# distant patients map to near-identical states (fully identical at bandwidth
+# 2, where a feature's lowest and highest values give the same state).
+MAX_BANDWIDTH = 1.0
+BANDWIDTH_SCAN = np.geomspace(1e-3, MAX_BANDWIDTH, 41)
 _CURVE_CACHE = {}  # (training data, entangle, n_reps) -> median kernel value per scanned bandwidth
 
 
@@ -211,8 +217,8 @@ def calibrate_bandwidth(X_scaled, target, entangle=True, n_reps=N_REPS):
     the same) as the bandwidth grows. We scan BANDWIDTH_SCAN, take the first
     crossing of `target` and interpolate (log-linearly) between the two
     scanned points around it. If the target is never reached (the kernel
-    cannot get that small), the scanned bandwidth whose median is closest to
-    the target is used. The scan does not depend on the target, so it is
+    cannot get that small without passing MAX_BANDWIDTH), the scanned
+    bandwidth whose median is closest to the target is used. The scan does not depend on the target, so it is
     cached per training set.
     """
     key = (X_scaled.tobytes(), X_scaled.shape, entangle, n_reps)
