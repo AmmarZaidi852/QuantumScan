@@ -3,7 +3,7 @@ confirm.py - Confirmation run on NEW seeds 5-9.
 
 Pre-registered before running (decided before any seed 5-9 result was seen):
     - Model code and settings are frozen at commit
-      2e46df74b919b60978046b7d5fcaeb9669c406e2. This script changes nothing
+      7a802814d68bf5ddc545e0e8991dfbbc4e6f8361. This script changes nothing
       in them: it reuses run_all.main() and ablation.main() and only swaps
       in the new seeds and a separate output folder.
     - PRIMARY TEST (one test, no multiple-testing correction):
