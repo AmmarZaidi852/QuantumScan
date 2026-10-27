@@ -1,105 +1,107 @@
 BOTTOM LINE
-  4 qubits: best quantum model vs SVM-RBF (pooled over N) is QK-Hybrid, -0.002 AUROC, Holm p = 0.949.
-  8 qubits: best quantum model vs SVM-RBF (pooled over N) is QK-Hybrid, +0.003 AUROC, Holm p = 0.949.
-  0 of 10 quantum-vs-SVM-RBF comparisons are significantly better after Holm correction.
-  Entanglement (ZZ gates) significantly helped in 0 and significantly hurt in 0 of 6 with/without-ZZ comparisons.
+  4 qubits: best quantum model vs SVM-RBF (pooled over N) is QK-NoEntangle, +0.012 AUROC, Holm p = 0.192.
+  8 qubits: best quantum model vs SVM-RBF (pooled over N) is QK-NoEntangle, +0.011 AUROC, Holm p = 0.023.
+  1 of 10 quantum-vs-SVM-RBF comparisons are significantly better after Holm correction.
+  Entanglement (ZZ gates) significantly helped in 0 and significantly hurt in 1 of 6 with/without-ZZ comparisons.
+  The best quantum model uses no entanglement at all, so any edge it has is not
+  a quantum effect: its kernel can be computed classically.
 
 WHO WON WHERE (highest mean test AUROC over 5 seeds)
   4 qubits, N=25 : winner QK-NoEntangle (0.891); best quantum QK-NoEntangle (0.891) vs SVM-RBF (0.882)
-  4 qubits, N=50 : winner LogReg (0.899); best quantum QK-Hybrid (0.879) vs SVM-RBF (0.878)
+  4 qubits, N=50 : winner QK-NoEntangle (0.901); best quantum QK-NoEntangle (0.901) vs SVM-RBF (0.878)
   4 qubits, N=100: winner QK-NoEntangle (0.915); best quantum QK-NoEntangle (0.915) vs SVM-RBF (0.903)
-  4 qubits, N=200: winner LogReg (0.909); best quantum QK-Hybrid (0.895) vs SVM-RBF (0.891)
+  4 qubits, N=200: winner LogReg (0.909); best quantum QK-NoEntangle (0.895) vs SVM-RBF (0.891)
   8 qubits, N=25 : winner QK-NoEntangle (0.914); best quantum QK-NoEntangle (0.914) vs SVM-RBF (0.897)
   8 qubits, N=50 : winner QK-NoEntangle (0.895); best quantum QK-NoEntangle (0.895) vs SVM-RBF (0.880)
-  8 qubits, N=100: winner QK-NoEntangle (0.930); best quantum QK-NoEntangle (0.930) vs SVM-RBF (0.918)
+  8 qubits, N=100: winner QK-NoEntangle (0.931); best quantum QK-NoEntangle (0.931) vs SVM-RBF (0.918)
   8 qubits, N=200: winner QK-Hybrid (0.911); best quantum QK-Hybrid (0.911) vs SVM-RBF (0.908)
-  -> A quantum model had the best mean AUROC in 6 of 8 settings.
+  -> A quantum model had the best mean AUROC in 7 of 8 settings.
 
 WHICH QUANTUM MODEL RIVALS OR BEATS SVM-RBF? (mean AUROC difference; 'beats' = more than 0.01 higher, 'rivals' = within +-0.01)
   QK-Fidelity:
     beats   0/8: -
     rivals  3/8: 4q N=200 (-0.004), 8q N=50 (+0.001), 8q N=200 (-0.010)
-    behind  5/8: 4q N=25 (-0.029), 4q N=50 (-0.026), 4q N=100 (-0.015), 8q N=25 (-0.024), 8q N=100 (-0.016)
+    behind  5/8: 4q N=25 (-0.025), 4q N=50 (-0.025), 4q N=100 (-0.015), 8q N=25 (-0.024), 8q N=100 (-0.014)
   QK-Projected:
     beats   0/8: -
-    rivals  3/8: 4q N=100 (-0.010), 4q N=200 (-0.003), 8q N=50 (+0.009)
-    behind  5/8: 4q N=25 (-0.031), 4q N=50 (-0.013), 8q N=25 (-0.041), 8q N=100 (-0.021), 8q N=200 (-0.020)
+    rivals  2/8: 4q N=200 (-0.003), 8q N=50 (+0.009)
+    behind  6/8: 4q N=25 (-0.033), 4q N=50 (-0.016), 4q N=100 (-0.010), 8q N=25 (-0.042), 8q N=100 (-0.021), 8q N=200 (-0.020)
   QK-NoEntangle:
-    beats   4/8: 4q N=100 (+0.012), 8q N=25 (+0.017), 8q N=50 (+0.015), 8q N=100 (+0.012)
-    rivals  2/8: 4q N=25 (+0.009), 4q N=200 (+0.002)
-    behind  2/8: 4q N=50 (-0.050), 8q N=200 (-0.034)
+    beats   5/8: 4q N=50 (+0.023), 4q N=100 (+0.012), 8q N=25 (+0.017), 8q N=50 (+0.015), 8q N=100 (+0.013)
+    rivals  3/8: 4q N=25 (+0.009), 4q N=200 (+0.004), 8q N=200 (-0.001)
+    behind  0/8: -
   QK-Hybrid:
     beats   0/8: -
-    rivals  7/8: 4q N=50 (+0.001), 4q N=100 (+0.000), 4q N=200 (+0.004), 8q N=25 (+0.003), 8q N=50 (+0.005), 8q N=100 (+0.001), 8q N=200 (+0.003)
-    behind  1/8: 4q N=25 (-0.011)
+    rivals  8/8: 4q N=25 (-0.009), 4q N=50 (-0.005), 4q N=100 (+0.000), 4q N=200 (+0.004), 8q N=25 (+0.003), 8q N=50 (+0.005), 8q N=100 (+0.001), 8q N=200 (+0.004)
+    behind  0/8: -
   QK-Aligned:
     beats   0/8: -
-    rivals  3/8: 4q N=25 (-0.001), 8q N=25 (-0.002), 8q N=50 (-0.005)
-    behind  5/8: 4q N=50 (-0.015), 4q N=100 (-0.011), 4q N=200 (-0.015), 8q N=100 (-0.025), 8q N=200 (-0.031)
+    rivals  3/8: 4q N=25 (+0.003), 8q N=25 (-0.000), 8q N=50 (-0.002)
+    behind  5/8: 4q N=50 (-0.018), 4q N=100 (-0.015), 4q N=200 (-0.011), 8q N=100 (-0.026), 8q N=200 (-0.036)
 
 IS IT SIGNIFICANT? Quantum vs SVM-RBF (Wilcoxon signed-rank, pooled over N,
 20 pairs per qubit count; Holm correction over all 16 pooled tests)
-  4 qubits: QK-Fidelity   is not significantly different (diff -0.018, p = 0.105, Holm p = 0.949) than SVM-RBF
-  8 qubits: QK-Fidelity   is not significantly different (diff -0.012, p = 0.216, Holm p = 0.949) than SVM-RBF
-  4 qubits: QK-Projected  is not significantly different (diff -0.014, p = 0.123, Holm p = 0.949) than SVM-RBF
-  8 qubits: QK-Projected  is lower, but not significant after Holm correction (diff -0.018, p = 0.040, Holm p = 0.400) than SVM-RBF
-  4 qubits: QK-NoEntangle is not significantly different (diff -0.007, p = 0.154, Holm p = 0.949) than SVM-RBF
-  8 qubits: QK-NoEntangle is higher, but not significant after Holm correction (diff +0.003, p = 0.011, Holm p = 0.171) than SVM-RBF
-  4 qubits: QK-Hybrid     is not significantly different (diff -0.002, p = 0.812, Holm p = 0.949) than SVM-RBF
-  8 qubits: QK-Hybrid     is not significantly different (diff +0.003, p = 0.133, Holm p = 0.949) than SVM-RBF
-  4 qubits: QK-Aligned    is not significantly different (diff -0.011, p = 0.294, Holm p = 0.949) than SVM-RBF
-  8 qubits: QK-Aligned    is lower, but not significant after Holm correction (diff -0.016, p = 0.021, Holm p = 0.279) than SVM-RBF
-  -> No quantum model is significantly better than SVM-RBF after Holm correction.
+  4 qubits: QK-Fidelity   is not significantly different (diff -0.017, p = 0.105, Holm p = 0.738) than SVM-RBF
+  8 qubits: QK-Fidelity   is not significantly different (diff -0.012, p = 0.277, Holm p = 0.738) than SVM-RBF
+  4 qubits: QK-Projected  is not significantly different (diff -0.015, p = 0.108, Holm p = 0.738) than SVM-RBF
+  8 qubits: QK-Projected  is lower, but not significant after Holm correction (diff -0.019, p = 0.038, Holm p = 0.344) than SVM-RBF
+  4 qubits: QK-NoEntangle is higher, but not significant after Holm correction (diff +0.012, p = 0.019, Holm p = 0.192) than SVM-RBF
+  8 qubits: QK-NoEntangle is significantly higher (diff +0.011, p = 0.001, Holm p = 0.023) than SVM-RBF
+  4 qubits: QK-Hybrid     is not significantly different (diff -0.002, p = 0.985, Holm p = 0.985) than SVM-RBF
+  8 qubits: QK-Hybrid     is not significantly different (diff +0.003, p = 0.123, Holm p = 0.738) than SVM-RBF
+  4 qubits: QK-Aligned    is not significantly different (diff -0.010, p = 0.189, Holm p = 0.738) than SVM-RBF
+  8 qubits: QK-Aligned    is lower, but not significant after Holm correction (diff -0.016, p = 0.048, Holm p = 0.388) than SVM-RBF
+  -> Significantly better than SVM-RBF after Holm correction: QK-NoEntangle (8 qubits).
 
 STABILITY: spread (std) of test AUROC over the 5 seeds at N = 25, 50
   In brackets: ratio to SVM-RBF's std (< 1 = more stable than SVM-RBF).
-  4 qubits, N=25 : SVM-RBF 0.042, LogReg 0.012 [0.29], QK-Fidelity 0.040 [0.96], QK-Projected 0.030 [0.72], QK-NoEntangle 0.031 [0.74], QK-Hybrid 0.041 [0.98], QK-Aligned 0.036 [0.86]
-  4 qubits, N=50 : SVM-RBF 0.026, LogReg 0.019 [0.75], QK-Fidelity 0.052 [2.01], QK-Projected 0.045 [1.73], QK-NoEntangle 0.159 [6.19], QK-Hybrid 0.021 [0.82], QK-Aligned 0.041 [1.58]
-  8 qubits, N=25 : SVM-RBF 0.025, LogReg 0.037 [1.50], QK-Fidelity 0.023 [0.95], QK-Projected 0.033 [1.36], QK-NoEntangle 0.015 [0.61], QK-Hybrid 0.021 [0.85], QK-Aligned 0.024 [0.99]
-  8 qubits, N=50 : SVM-RBF 0.033, LogReg 0.023 [0.71], QK-Fidelity 0.040 [1.22], QK-Projected 0.038 [1.16], QK-NoEntangle 0.026 [0.81], QK-Hybrid 0.036 [1.10], QK-Aligned 0.028 [0.87]
-  Median std over these settings: classical 0.025, quantum 0.035.
+  4 qubits, N=25 : SVM-RBF 0.042, LogReg 0.012 [0.29], QK-Fidelity 0.033 [0.77], QK-Projected 0.033 [0.79], QK-NoEntangle 0.031 [0.74], QK-Hybrid 0.041 [0.98], QK-Aligned 0.034 [0.81]
+  4 qubits, N=50 : SVM-RBF 0.026, LogReg 0.019 [0.75], QK-Fidelity 0.051 [2.00], QK-Projected 0.044 [1.69], QK-NoEntangle 0.011 [0.41], QK-Hybrid 0.017 [0.66], QK-Aligned 0.043 [1.66]
+  8 qubits, N=25 : SVM-RBF 0.025, LogReg 0.037 [1.50], QK-Fidelity 0.023 [0.95], QK-Projected 0.034 [1.38], QK-NoEntangle 0.015 [0.61], QK-Hybrid 0.021 [0.85], QK-Aligned 0.023 [0.94]
+  8 qubits, N=50 : SVM-RBF 0.033, LogReg 0.023 [0.71], QK-Fidelity 0.040 [1.22], QK-Projected 0.038 [1.15], QK-NoEntangle 0.026 [0.81], QK-Hybrid 0.036 [1.10], QK-Aligned 0.031 [0.96]
+  Median std over these settings: classical 0.025, quantum 0.033.
   QK-Fidelity  : spread smaller than SVM-RBF in 2 of 4 settings (median ratio 1.09)
   QK-Projected : spread smaller than SVM-RBF in 1 of 4 settings (median ratio 1.26)
-  QK-NoEntangle: spread smaller than SVM-RBF in 3 of 4 settings (median ratio 0.78)
+  QK-NoEntangle: spread smaller than SVM-RBF in 4 of 4 settings (median ratio 0.68)
   QK-Hybrid    : spread smaller than SVM-RBF in 3 of 4 settings (median ratio 0.92)
-  QK-Aligned   : spread smaller than SVM-RBF in 3 of 4 settings (median ratio 0.93)
+  QK-Aligned   : spread smaller than SVM-RBF in 3 of 4 settings (median ratio 0.95)
   Caution: a std from 5 seeds is itself uncertain by roughly +-35%, so only
   ratios well away from 1 (below 0.5 or above 2) mean much.
 
 DID ENTANGLEMENT HELP? (same model with vs without ZZ gates, pooled over N)
-  4 qubits: QK-Fidelity vs QK-NoEntangle: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.012, p = 0.021, Holm p = 0.279)
-  8 qubits: QK-Fidelity vs QK-NoEntangle: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.015, p = 0.029, Holm p = 0.318)
-  4 qubits: QK-Hybrid vs QK-Hybrid-NoEnt: with entanglement, AUROC is not significantly different (diff -0.005, p = 0.105, Holm p = 0.949)
-  8 qubits: QK-Hybrid vs QK-Hybrid-NoEnt: with entanglement, AUROC is not significantly different (diff +0.001, p = 0.261, Holm p = 0.949)
-  4 qubits: QK-Aligned vs QK-Aligned-NoEnt: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.012, p = 0.012, Holm p = 0.171)
-  8 qubits: QK-Aligned vs QK-Aligned-NoEnt: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.007, p = 0.011, Holm p = 0.171)
-  -> Entanglement significantly helped in 0 and significantly hurt in 0 of 6 comparisons.
+  4 qubits: QK-Fidelity vs QK-NoEntangle: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.029, p = 0.004, Holm p = 0.059)
+  8 qubits: QK-Fidelity vs QK-NoEntangle: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.023, p = 0.004, Holm p = 0.059)
+  4 qubits: QK-Hybrid vs QK-Hybrid-NoEnt: with entanglement, AUROC is significantly lower (diff -0.008, p = 0.003, Holm p = 0.045)
+  8 qubits: QK-Hybrid vs QK-Hybrid-NoEnt: with entanglement, AUROC is not significantly different (diff -0.000, p = 0.126, Holm p = 0.738)
+  4 qubits: QK-Aligned vs QK-Aligned-NoEnt: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.019, p = 0.005, Holm p = 0.059)
+  8 qubits: QK-Aligned vs QK-Aligned-NoEnt: with entanglement, AUROC is lower, but not significant after Holm correction (diff -0.014, p = 0.004, Holm p = 0.059)
+  -> Entanglement significantly helped in 0 and significantly hurt in 1 of 6 comparisons.
   Without ZZ gates every patient is a product state, and the fidelity kernel
   is a product of one-qubit cos^2 terms that a classical computer evaluates directly.
 
 BANDWIDTH CHOSEN (calibrated on training data only; median [min-max] over N and seeds)
-  4 qubits, QK-Aligned   : 0.183 [0.108-0.606]
-  4 qubits, QK-Fidelity  : 0.179 [0.115-0.549]
-  4 qubits, QK-Hybrid    : 0.130 [0.093-0.570]
-  4 qubits, QK-NoEntangle: 0.476 [0.374-1.958]
-  4 qubits, QK-Projected : 0.132 [0.093-0.549]
-  8 qubits, QK-Aligned   : 0.158 [0.069-0.427]
-  8 qubits, QK-Fidelity  : 0.123 [0.069-0.300]
-  8 qubits, QK-Hybrid    : 0.087 [0.066-0.187]
-  8 qubits, QK-NoEntangle: 0.534 [0.263-1.668]
-  8 qubits, QK-Projected : 0.104 [0.066-0.174]
+  4 qubits, QK-Aligned   : 0.202 [0.106-0.569]
+  4 qubits, QK-Fidelity  : 0.179 [0.115-0.578]
+  4 qubits, QK-Hybrid    : 0.132 [0.094-0.599]
+  4 qubits, QK-NoEntangle: 0.542 [0.373-1.000]
+  4 qubits, QK-Projected : 0.133 [0.094-0.578]
+  8 qubits, QK-Aligned   : 0.120 [0.070-0.431]
+  8 qubits, QK-Fidelity  : 0.123 [0.070-0.243]
+  8 qubits, QK-Hybrid    : 0.087 [0.065-0.187]
+  8 qubits, QK-NoEntangle: 0.524 [0.264-0.932]
+  8 qubits, QK-Projected : 0.104 [0.065-0.173]
 
 GEOMETRIC DIFFERENCE g(K_classical || K_quantum) (Huang et al. 2021)
   g ranges from ~1 (classical kernel can learn everything the quantum kernel can)
   to order sqrt(N) (room for a quantum advantage). Median [min-max] over seeds:
-  4 qubits, N=25 : g = 2.78 [1.97-3.61]  (sqrt(N) = 5.0, median is 56% of it)
-  4 qubits, N=50 : g = 2.41 [1.88-4.71]  (sqrt(N) = 7.1, median is 34% of it)
-  4 qubits, N=100: g = 2.15 [1.92-2.33]  (sqrt(N) = 10.0, median is 21% of it)
+  4 qubits, N=25 : g = 2.78 [1.96-3.78]  (sqrt(N) = 5.0, median is 56% of it)
+  4 qubits, N=50 : g = 2.42 [1.87-4.69]  (sqrt(N) = 7.1, median is 34% of it)
+  4 qubits, N=100: g = 2.17 [1.92-2.33]  (sqrt(N) = 10.0, median is 22% of it)
   4 qubits, N=200: g = 5.04 [2.39-5.68]  (sqrt(N) = 14.1, median is 36% of it)
-  8 qubits, N=25 : g = 2.27 [1.90-2.56]  (sqrt(N) = 5.0, median is 45% of it)
-  8 qubits, N=50 : g = 2.03 [1.99-4.08]  (sqrt(N) = 7.1, median is 29% of it)
-  8 qubits, N=100: g = 2.13 [2.03-4.70]  (sqrt(N) = 10.0, median is 21% of it)
-  8 qubits, N=200: g = 2.67 [2.29-4.63]  (sqrt(N) = 14.1, median is 19% of it)
+  8 qubits, N=25 : g = 2.25 [1.90-2.58]  (sqrt(N) = 5.0, median is 45% of it)
+  8 qubits, N=50 : g = 2.03 [1.99-4.05]  (sqrt(N) = 7.1, median is 29% of it)
+  8 qubits, N=100: g = 2.12 [2.04-3.47]  (sqrt(N) = 10.0, median is 21% of it)
+  8 qubits, N=200: g = 2.67 [2.30-4.65]  (sqrt(N) = 14.1, median is 19% of it)
 
 NOTE: with 5 seeds the smallest possible two-sided Wilcoxon p-value is 0.0625,
 so per-N tests in wilcoxon.csv can never reach p < 0.05; use the pooled rows.
